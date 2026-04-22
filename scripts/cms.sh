@@ -78,7 +78,7 @@ require_spotiflac_cli() {
   if [ -x "$SPOTIFLAC_CLI_BIN" ]; then
     return 0
   fi
-  echo "spotiflac-cli not found. Installing..."
+  echo "⬇️  spotiflac-cli not found. Installing..."
   install_spotiflac_cli
 }
 
@@ -142,10 +142,11 @@ action_metadata() {
 action_configure_env() {
   ensure_env_file
   local editor="${VISUAL:-${EDITOR:-nano}}"
-  if ensure_cmd "$editor"; then
-    "$editor" "$PROJECT_ROOT/.env"
+  local editor_cmd="${editor%% *}"
+  if ensure_cmd "$editor_cmd"; then
+    $editor "$PROJECT_ROOT/.env"
   else
-    echo "⚠️  No editor found (tried $editor)."
+    echo "⚠️  No editor found (tried $editor_cmd)."
     echo "   Manually edit: $PROJECT_ROOT/.env"
     pause
   fi
