@@ -66,7 +66,7 @@ banner() {
   printf '║                                                          ║\n'
   printf '║   🎵  Cloud Music Stack  —  Setup Wizard                ║\n'
   printf '║                                                          ║\n'
-  printf '║   Built by %-45s║\n' "${MAGENTA}${BOLD}@Paidguy${CYAN}  https://github.com/Paidguy/music${NC}${CYAN}"
+  printf "║   Built by ${MAGENTA}${BOLD}@Paidguy${NC}${CYAN}  https://github.com/Paidguy/music       ║\n"
   printf '║                                                          ║\n'
   printf '╚══════════════════════════════════════════════════════════╝\n'
   printf "${NC}\n"
@@ -285,11 +285,11 @@ main() {
 
     printf "\n"
     info "Waiting for Navidrome to be ready…"
-    local retries=30
+    local retries=31
     until curl -sf http://localhost:4533/ping >/dev/null 2>&1; do
       retries=$((retries - 1))
       if [ "$retries" -le 0 ]; then
-        warn "Navidrome did not respond after 5 minutes."
+        warn "Navidrome did not respond after ~5 minutes."
         info "Check logs with: docker compose logs navidrome"
         break
       fi
@@ -314,9 +314,11 @@ main() {
   printf '║                                                          ║\n'
   printf '║   ✅  Setup Complete!                                    ║\n'
   printf '║                                                          ║\n'
+  local domain_display
+  domain_display="$(printf '%.54s' "Caddy HTTPS   →  https://$domain_val")"
   printf "║   %-57s║\n" "Navidrome UI  →  http://localhost:4533"
   printf "║   %-57s║\n" "Syncthing UI  →  http://localhost:8384"
-  printf "║   %-57s║\n" "Caddy HTTPS   →  https://$domain_val"
+  printf "║   %-57s║\n" "$domain_display"
   printf '║                                                          ║\n'
   printf '║   Next step: run  ./scripts/cms.sh  to download music   ║\n'
   printf '║                                                          ║\n'

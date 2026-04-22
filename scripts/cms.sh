@@ -309,11 +309,11 @@ action_stack_up() {
   docker compose up -d
   printf "\n"
   info "Waiting for Navidrome to respond…"
-  local retries=18
+  local retries=19
   until curl -sf --max-time 2 http://localhost:4533/ping >/dev/null 2>&1; do
     retries=$((retries - 1))
     if [ "$retries" -le 0 ]; then
-      warn "Navidrome did not respond within 3 minutes."
+      warn "Navidrome did not respond within ~3 minutes."
       info "Check logs: docker compose logs navidrome"
       pause; return 0
     fi
@@ -443,7 +443,9 @@ draw_menu() {
   printf "║  ${BOLD}CONFIGURATION${NC}${CYAN}                                       ║\n"
   printf "║  ${BOLD}${YELLOW}[9]${NC}${CYAN} Domain setup wizard                             ║\n"
   printf "║  ${BOLD}${YELLOW}[p]${NC}${CYAN} Show paths / .env                               ║\n"
-  printf "║  %-57s║\n" "Domain: ${NC}${WHITE}$domain${CYAN}"
+  local domain_display
+  domain_display="$(printf '%.49s' "Domain: $domain")"
+  printf "║  %-57s║\n" "$domain_display"
   printf '╠══════════════════════════════════════════════════════════╣\n'
   printf "║  ${BOLD}${YELLOW}[0]${NC}${CYAN} Exit                                            ║\n"
   printf '╚══════════════════════════════════════════════════════════╝\n'
