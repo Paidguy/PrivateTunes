@@ -7,6 +7,9 @@ Self-hosted music streaming with a **pure CLI download workflow** (no VM, no GUI
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Navidrome](https://img.shields.io/badge/Powered%20by-Navidrome-00C9FF)](https://www.navidrome.org/)
+[![Author](https://img.shields.io/badge/by-%40Paidguy-blueviolet)](https://github.com/Paidguy)
+
+**Created and maintained by [@Paidguy](https://github.com/Paidguy)**
 
 </div>
 
@@ -37,14 +40,18 @@ For acquisition, it integrates [`spotiflac-cli`](https://github.com/Superredston
 git clone https://github.com/Paidguy/music-stack.git
 cd music-stack
 
-# Host bootstrap (installs spotiflac-cli into ./bin and prepares folders)
+# Full automated setup:
+# - Installs Docker Engine + Docker Compose plugin (if missing)
+# - Installs system dependencies (curl, ca-certificates, git, gnupg)
+# - Creates required directories (music/, data/navidrome/, data/syncthing/)
+# - Downloads spotiflac-cli into ./bin/
+# - Copies .env.example → .env
+# - Starts the Docker stack
+# - Waits for Navidrome to be healthy
 chmod +x scripts/setup.sh scripts/cms.sh
 sudo ./scripts/setup.sh
 
-# Start the stack
-docker compose up -d
-
-# Download music into ./music (interactive menu)
+# Download music / manage the stack interactively
 ./scripts/cms.sh
 ```
 
@@ -58,10 +65,14 @@ Run:
 
 Menu actions include:
 
-- **Install/Update spotiflac-cli**
-- **Download from Spotify URL** (saves into `./music`)
-- **Start/Stop the stack** (`docker compose up -d` / `docker compose down`)
-- **Logs**
+- **s) Full setup** — runs `setup.sh` end-to-end (Docker + deps + stack start)
+- **1) Install/Update spotiflac-cli**
+- **2) Download from Spotify URL** (saves into `./music`)
+- **3) View track metadata**
+- **4–6) Start / Stop / Logs** (`docker compose` wrappers)
+- **7) Stack status** — health check for Navidrome & Syncthing
+- **8) Restart Navidrome**
+- **9) Edit .env** — configure DOMAIN, UID, GID
 
 ## Configuration
 
