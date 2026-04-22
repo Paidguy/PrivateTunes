@@ -42,9 +42,9 @@ confirm() {
 prompt_val() {
   local label="$1" default="${2:-}" val
   if [ -n "$default" ]; then
-    printf " ${YELLOW}?${NC}  ${BOLD}%s${NC} [%s]: " "$label" "$default"
+    printf " ${YELLOW}?${NC}  ${BOLD}%s${NC} [%s]: " "$label" "$default" >&2
   else
-    printf " ${YELLOW}?${NC}  ${BOLD}%s${NC}: " "$label"
+    printf " ${YELLOW}?${NC}  ${BOLD}%s${NC}: " "$label" >&2
   fi
   read -r val
   printf '%s' "${val:-$default}"

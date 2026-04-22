@@ -33,7 +33,7 @@ pause() { printf "\n"; read -r -p "  Press Enter to continue…" _; }
 
 prompt() {
   local label="${1:?label required}" val
-  printf "  ${YELLOW}?${NC}  ${BOLD}%s${NC} " "$label"
+  printf "  ${YELLOW}?${NC}  ${BOLD}%s${NC} " "$label" >&2
   read -r val
   printf '%s' "$val"
 }
@@ -41,9 +41,9 @@ prompt() {
 prompt_val() {
   local label="$1" default="${2:-}" val
   if [ -n "$default" ]; then
-    printf "  ${YELLOW}?${NC}  ${BOLD}%s${NC} [%s]: " "$label" "$default"
+    printf "  ${YELLOW}?${NC}  ${BOLD}%s${NC} [%s]: " "$label" "$default" >&2
   else
-    printf "  ${YELLOW}?${NC}  ${BOLD}%s${NC}: " "$label"
+    printf "  ${YELLOW}?${NC}  ${BOLD}%s${NC}: " "$label" >&2
   fi
   read -r val
   printf '%s' "${val:-$default}"
@@ -62,10 +62,12 @@ navidrome_ok() { curl -sf --max-time 2 http://localhost:4533/ping >/dev/null 2>&
 syncthing_ok() { curl -sf --max-time 2 http://localhost:8384/ >/dev/null 2>&1; }
 
 status_badge() {
+  local name="$1" padded
+  padded="$(printf '%-12s' "$name")"
   if [ "$2" -eq 0 ]; then
-    printf "${GREEN}${BOLD}● %-12s${NC}" "$1"
+    printf "${GREEN}${BOLD}●${NC} %s" "$padded"
   else
-    printf "${RED}${BOLD}○ %-12s${NC}" "$1"
+    printf "${RED}○${NC} %s" "$padded"
   fi
 }
 
@@ -503,7 +505,13 @@ draw_menu() {
 
   local domain lib_size
   domain="$(grep '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 'not configured')"
+  [ -z "$domain" ] && domain="not configured"
   lib_size="$(music_size)"
+
+  # Truncate domain for display (max 40 chars)
+  if [ ${#domain} -gt 40 ]; then
+    domain="${domain:0:37}..."
+  fi
 
   clear || true
   printf "${CYAN}"
@@ -532,10 +540,8 @@ draw_menu() {
   printf "║  ${BOLD}CONFIGURATION${NC}${CYAN}                                        ║\n"
   printf "║  ${BOLD}${YELLOW}[9]${NC}${CYAN} Domain setup wizard                              ║\n"
   printf "║  ${BOLD}${YELLOW}[c]${NC}${CYAN} Backup config       ${BOLD}${YELLOW}[p]${NC}${CYAN} Show paths / .env        ║\n"
-  local domain_display lib_display
-  domain_display="$(printf '%.46s' "Domain: $domain")"
-  lib_display="Library: $lib_size"
-  printf "║  %-29s  %-27s║\n" "$domain_display" "$lib_display"
+  printf "║  ${DIM}Domain:  %-48s${NC}${CYAN}║\n" "$domain"
+  printf "║  ${DIM}Library: %-48s${NC}${CYAN}║\n" "$lib_size"
   printf '╠══════════════════════════════════════════════════════════╣\n'
   printf "║  ${BOLD}${YELLOW}[0]${NC}${CYAN} Exit                                             ║\n"
   printf '╚══════════════════════════════════════════════════════════╝\n'
