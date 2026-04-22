@@ -1,63 +1,74 @@
 #!/bin/bash
 
-echo "🎵 Starting Music Stack Setup..."
-TARGET_USER="${SUDO_USER:-$USER}"
-TARGET_HOME="$(eval echo "~$TARGET_USER")"
+set -euo pipefail
+
+echo "🎵 Starting Music Stack Setup (CLI Edition)..."
+
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if ! id "$TARGET_USER" >/dev/null 2>&1; then
-    echo "❌ Target user '$TARGET_USER' does not exist."
+BIN_DIR="$PROJECT_ROOT/bin"
+SPOTIFLAC_CLI_BIN="$BIN_DIR/spotiflac-cli"
+
+ensure_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+detect_arch() {
+  local arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) echo "amd64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    *)
+      echo "unsupported"
+      return 1
+      ;;
+  esac
+}
+
+install_spotiflac_cli() {
+  local arch asset url
+  arch="$(detect_arch)"
+  asset="spotiflac-cli-linux-$arch"
+  url="https://github.com/Superredstone/spotiflac-cli/releases/download/v1.0.0/$asset"
+
+  echo "⬇️ Installing spotiflac-cli ($asset)..."
+  mkdir -p "$BIN_DIR"
+
+  if ensure_cmd curl; then
+    curl -fsSL "$url" -o "$SPOTIFLAC_CLI_BIN"
+  elif ensure_cmd wget; then
+    wget -q --show-progress -O "$SPOTIFLAC_CLI_BIN" "$url"
+  else
+    echo "❌ Missing downloader. Install either 'curl' or 'wget' and retry."
     exit 1
-fi
-if [[ ! "$TARGET_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
-    echo "❌ Target user '$TARGET_USER' contains unsupported characters."
-    exit 1
-fi
-SAFE_TARGET_USER="$(printf '%s' "$TARGET_USER" | sed 's/[\\/&]/\\&/g')"
+  fi
 
-# 1. Update & Install System Dependencies
-# We need xfce (desktop), tightvnc (server), novnc (web bridge), and libfuse2 (for AppImage)
-echo "📦 Installing Desktop & Dependencies..."
-sudo apt update
-sudo apt install -y xfce4 xfce4-goodies tightvncserver novnc python3-websockify libfuse2 wget
+  chmod +x "$SPOTIFLAC_CLI_BIN"
+  echo "   -> Installed to $SPOTIFLAC_CLI_BIN"
+}
 
-# 2. Download SpotiFLAC (The Downloader)
-# We download it to the root project folder for easy access
-echo "⬇️ Downloading SpotiFLAC v7.0.6..."
-wget -q --show-progress -O "$PROJECT_ROOT/SpotiFLAC.AppImage" https://github.com/afkarxyz/SpotiFLAC/releases/download/v7.0.6/SpotiFLAC-Linux-x86_64.AppImage
-chmod +x "$PROJECT_ROOT/SpotiFLAC.AppImage"
-
-# 2.5 Create data folders with user-owned permissions
-mkdir -p "$PROJECT_ROOT/music" "$PROJECT_ROOT/data/navidrome" "$PROJECT_ROOT/data/syncthing"
-sudo chown -R "$TARGET_USER:$TARGET_USER" "$PROJECT_ROOT/music" "$PROJECT_ROOT/data/navidrome" "$PROJECT_ROOT/data/syncthing"
-
-# 3. Configure VNC Startup
-# This ensures the gray screen doesn't happen
-echo "⚙️ Configuring VNC Startup..."
-mkdir -p "$TARGET_HOME/.vnc"
-echo -e "#!/bin/bash\nxrdb \$HOME/.Xresources\nstartxfce4 &" > "$TARGET_HOME/.vnc/xstartup"
-chmod +x "$TARGET_HOME/.vnc/xstartup"
-sudo chown -R "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.vnc"
-
-# 4. Install noVNC System Service
-# Copies the service file from your repo to the system folder
-echo "🔗 Installing Web Desktop Service..."
-if [ -f "$PROJECT_ROOT/scripts/novnc.service" ]; then
-    TMP_SERVICE_FILE="$(mktemp)"
-    chmod 600 "$TMP_SERVICE_FILE"
-    sed "s/__NOVNC_USER__/$SAFE_TARGET_USER/" "$PROJECT_ROOT/scripts/novnc.service" > "$TMP_SERVICE_FILE"
-    sudo cp "$TMP_SERVICE_FILE" /etc/systemd/system/novnc.service
-    rm -f "$TMP_SERVICE_FILE"
-    sudo systemctl daemon-reload
-    sudo systemctl enable novnc
-    echo "   -> Service installed and enabled."
+echo "📦 Installing system dependencies (no GUI)..."
+if ensure_cmd apt-get; then
+  sudo apt-get update
+  sudo apt-get install -y curl ca-certificates git
 else
-    echo "   ⚠️ Warning: scripts/novnc.service not found. Skipping service install."
+  echo "⚠️ apt-get not found. Skipping OS package install."
+  echo "   Ensure you have: curl (or wget), ca-certificates, git"
 fi
 
-echo "✅ Installation Complete!"
+echo "📁 Ensuring project directories exist..."
+mkdir -p "$PROJECT_ROOT/music" "$PROJECT_ROOT/data/navidrome" "$PROJECT_ROOT/data/syncthing"
+
+if [ ! -f "$SPOTIFLAC_CLI_BIN" ]; then
+  install_spotiflac_cli
+else
+  echo "✅ spotiflac-cli already present at $SPOTIFLAC_CLI_BIN"
+fi
+
+echo "✅ Setup Complete!"
 echo "------------------------------------------------"
 echo "NEXT STEPS:"
-echo "1. Run 'vncserver' to set your password and start the screen."
-echo "2. Run 'sudo systemctl start novnc' to open the web bridge."
-echo "3. Run 'docker compose up -d' to start the music server."
+echo "1. (Optional) Configure DOMAIN: cp .env.example .env && nano .env"
+echo "2. Start the music server: docker compose up -d"
+echo "3. Download music: ./scripts/cms.sh"
 echo "------------------------------------------------"

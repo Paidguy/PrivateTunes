@@ -3,8 +3,3 @@ your-domain.duckdns.org {
     encode zstd gzip
     reverse_proxy http://navidrome:4533
 }
-
-# The Web Desktop (on Port 8443)
-your-domain.duckdns.org:8443 {
-    reverse_proxy http://host.docker.internal:6080
-}

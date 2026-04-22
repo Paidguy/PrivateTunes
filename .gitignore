@@ -16,3 +16,7 @@ Thumbs.db
 # Ignore large binaries
 *.AppImage
 squashfs-root/
+
+# Local tooling
+/bin/
+/tmp/
