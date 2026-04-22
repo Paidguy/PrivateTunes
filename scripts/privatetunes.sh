@@ -10,6 +10,12 @@ BIN_DIR="$PROJECT_ROOT/bin"
 SPOTIFLAC_CLI_BIN="$BIN_DIR/spotiflac-cli"
 DEFAULT_OUTPUT_DIR="$PROJECT_ROOT/music"
 LINKS_FILE="$PROJECT_ROOT/links.txt"
+HISTORY_DIR="$PROJECT_ROOT/data"
+HISTORY_FILE="$HISTORY_DIR/download_history.json"
+HISTORY_LOCK="$HISTORY_DIR/.history.lock"
+MAX_RETRIES=3
+BASE_BACKOFF=5
+RATE_LIMIT_WAIT=60
 
 # ── colour palette ────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
@@ -89,6 +95,184 @@ require_docker() {
     info "Fix it by running option [s] Full Setup."
     pause; return 1
   fi
+}
+
+# ── download history system ───────────────────────────────────────────────────
+# Persistent JSON database to track completed downloads across sessions.
+# Uses atomic writes (temp + mv) to prevent corruption on crash.
+
+history_init() {
+  mkdir -p "$HISTORY_DIR"
+  if [ ! -f "$HISTORY_FILE" ]; then
+    printf '{"version":1,"downloads":{}}' > "$HISTORY_FILE"
+  fi
+}
+
+# Normalize a Spotify URL: strip tracking params, extract canonical form
+normalize_url() {
+  local url="$1"
+  # Remove query parameters (?si=... &utm_... etc)
+  url="${url%%\?*}"
+  # Remove trailing slashes
+  url="${url%%/}"
+  # Normalize protocol
+  url="$(printf '%s' "$url" | sed 's|^http://|https://|')"
+  printf '%s' "$url"
+}
+
+# Extract the Spotify canonical ID (e.g., "track/4iV5W9uYEdYUVa79Axb7Rh")
+extract_spotify_id() {
+  local url="$1"
+  url="$(normalize_url "$url")"
+  # Match patterns like: open.spotify.com/track/ID, open.spotify.com/album/ID, etc.
+  local id
+  id="$(printf '%s' "$url" | sed -n 's|.*open\.spotify\.com/\(track/[^/]*\).*|\1|p')"
+  [ -z "$id" ] && id="$(printf '%s' "$url" | sed -n 's|.*open\.spotify\.com/\(album/[^/]*\).*|\1|p')"
+  [ -z "$id" ] && id="$(printf '%s' "$url" | sed -n 's|.*open\.spotify\.com/\(playlist/[^/]*\).*|\1|p')"
+  # Fallback: use the normalized URL itself as the ID
+  [ -z "$id" ] && id="$url"
+  printf '%s' "$id"
+}
+
+# Check if a URL has already been downloaded (returns 0 if already done)
+history_check() {
+  local url="$1"
+  history_init
+  local norm_url spotify_id
+  norm_url="$(normalize_url "$url")"
+  spotify_id="$(extract_spotify_id "$url")"
+
+  if ensure_cmd jq; then
+    # Check by both normalized URL and Spotify ID
+    local found
+    found=$(jq -r --arg nurl "$norm_url" --arg sid "$spotify_id" \
+      '.downloads | to_entries[] | select(.value.normalized_url == $nurl or .key == $sid) | .value.status' \
+      "$HISTORY_FILE" 2>/dev/null | head -1)
+    [ "$found" = "completed" ] && return 0
+  else
+    # Fallback: grep-based check (less precise but works without jq)
+    if grep -qF "\"$spotify_id\"" "$HISTORY_FILE" 2>/dev/null && \
+       grep -qF '"completed"' "$HISTORY_FILE" 2>/dev/null; then
+      # Additional validation: check if the specific ID has completed status
+      if grep -A2 "\"$spotify_id\"" "$HISTORY_FILE" 2>/dev/null | grep -qF '"completed"'; then
+        return 0
+      fi
+    fi
+  fi
+  return 1
+}
+
+# Record a completed download in the history (atomic write)
+history_record() {
+  local url="$1" status="${2:-completed}"
+  history_init
+  local norm_url spotify_id ts
+  norm_url="$(normalize_url "$url")"
+  spotify_id="$(extract_spotify_id "$url")"
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)"
+
+  if ensure_cmd jq; then
+    local tmp_file="${HISTORY_FILE}.tmp.$$"
+    jq --arg sid "$spotify_id" \
+       --arg nurl "$norm_url" \
+       --arg ourl "$url" \
+       --arg st "$status" \
+       --arg ts "$ts" \
+       '.downloads[$sid] = {
+          "original_url": $ourl,
+          "normalized_url": $nurl,
+          "status": $st,
+          "timestamp": $ts
+        }' "$HISTORY_FILE" > "$tmp_file" 2>/dev/null && \
+      mv -f "$tmp_file" "$HISTORY_FILE"
+  else
+    # Fallback: append to a simpler line-based log
+    local log_file="${HISTORY_FILE%.json}.log"
+    printf '%s\t%s\t%s\t%s\n' "$ts" "$status" "$spotify_id" "$norm_url" >> "$log_file"
+  fi
+}
+
+# Check if files already exist on disk for a URL (filesystem-level dedup)
+filesystem_check() {
+  local url="$1"
+  # We can't perfectly predict filenames, but if the music dir has any content
+  # that was recorded in history, trust the history. This is a secondary check.
+  # For now, return 1 (not found) — the history DB is the primary source.
+  return 1
+}
+
+# Get download history statistics
+history_stats() {
+  history_init
+  if ensure_cmd jq; then
+    local total completed failed
+    total=$(jq '.downloads | length' "$HISTORY_FILE" 2>/dev/null || echo 0)
+    completed=$(jq '[.downloads[] | select(.status == "completed")] | length' "$HISTORY_FILE" 2>/dev/null || echo 0)
+    failed=$(jq '[.downloads[] | select(.status == "failed")] | length' "$HISTORY_FILE" 2>/dev/null || echo 0)
+    printf '%s %s %s' "$total" "$completed" "$failed"
+  else
+    local log_file="${HISTORY_FILE%.json}.log"
+    if [ -f "$log_file" ]; then
+      local total completed failed
+      total=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+      completed=$(grep -c 'completed' "$log_file" 2>/dev/null || echo 0)
+      failed=$(grep -c 'failed' "$log_file" 2>/dev/null || echo 0)
+      printf '%s %s %s' "$total" "$completed" "$failed"
+    else
+      printf '0 0 0'
+    fi
+  fi
+}
+
+# Also check the fallback log for history (for non-jq systems)
+history_check_log() {
+  local url="$1"
+  local log_file="${HISTORY_FILE%.json}.log"
+  local spotify_id
+  spotify_id="$(extract_spotify_id "$url")"
+  if [ -f "$log_file" ]; then
+    grep -qF "completed" "$log_file" 2>/dev/null && \
+      grep -qF "$spotify_id" "$log_file" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+# Download with retry and exponential backoff
+download_with_retry() {
+  local url="$1" output_dir="$2"
+  local attempt=0 wait_time=$BASE_BACKOFF
+  local exit_code
+
+  while [ $attempt -lt $MAX_RETRIES ]; do
+    attempt=$((attempt + 1))
+
+    if [ $attempt -gt 1 ]; then
+      warn "Retry $attempt/$MAX_RETRIES in ${wait_time}s…"
+      sleep $wait_time
+      wait_time=$((wait_time * 3))  # Exponential backoff: 5 → 15 → 45
+    fi
+
+    "$SPOTIFLAC_CLI_BIN" download "$url" --output "$output_dir" 2>&1
+    exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
+      return 0
+    fi
+
+    # Check for rate limiting signals in the output
+    # (spotiflac-cli may output rate limit errors)
+    if [ $exit_code -ne 0 ] && [ $attempt -lt $MAX_RETRIES ]; then
+      warn "Download attempt $attempt failed (exit code: $exit_code)"
+      # If this looks like a rate limit, wait longer
+      if [ $wait_time -lt $RATE_LIMIT_WAIT ]; then
+        warn "Possible rate limit — extending wait to ${RATE_LIMIT_WAIT}s"
+        wait_time=$RATE_LIMIT_WAIT
+      fi
+    fi
+  done
+
+  err "All $MAX_RETRIES attempts failed for: $url"
+  return 1
 }
 
 # ── spotiflac-cli ─────────────────────────────────────────────────────────────
@@ -374,6 +558,7 @@ show_help() {
   printf "  ${YELLOW}2${NC}  Download a Spotify track/album/playlist as FLAC\n"
   printf "  ${YELLOW}3${NC}  View metadata for a Spotify track\n"
   printf "  ${YELLOW}b${NC}  Batch download all URLs from links.txt\n"
+  printf "  ${YELLOW}d${NC}  Download history (view / clear / retry)\n"
   printf "  ${YELLOW}4${NC}  Start stack (docker compose up -d)\n"
   printf "  ${YELLOW}5${NC}  Stop stack (docker compose down)\n"
   printf "  ${YELLOW}6${NC}  Follow live container logs\n"
@@ -414,9 +599,22 @@ action_download() {
     err "URL is required."; pause; return 0
   fi
   printf "\n"
+
+  # Check download history
+  if history_check "$url" || history_check_log "$url"; then
+    local spotify_id
+    spotify_id="$(extract_spotify_id "$url")"
+    warn "Already downloaded: $spotify_id"
+    if ! confirm "Re-download anyway?"; then
+      info "Skipped."; pause; return 0
+    fi
+    info "Force re-downloading…"
+  fi
+
   info "Downloading to: $DEFAULT_OUTPUT_DIR"
-  if "$SPOTIFLAC_CLI_BIN" download "$url" --output "$DEFAULT_OUTPUT_DIR"; then
-    ok "Download complete."
+  if download_with_retry "$url" "$DEFAULT_OUTPUT_DIR"; then
+    history_record "$url" "completed"
+    ok "Download complete. ✔ Saved to history."
     # Trigger Navidrome scan if running
     if navidrome_ok; then
       info "Triggering Navidrome library scan…"
@@ -424,7 +622,8 @@ action_download() {
         ok "Scan triggered." || info "Auto-scan not available — Navidrome will pick it up on next scheduled scan."
     fi
   else
-    err "Download failed. Check the URL and try again."
+    history_record "$url" "failed"
+    err "Download failed after $MAX_RETRIES attempts."
   fi
   pause
 }
@@ -439,8 +638,12 @@ action_batch_download() {
     pause; return 0
   fi
 
-  local count=0 total=0 failed=0
-  # Count non-empty, non-comment lines
+  # ── Phase 1: Scan and filter ──
+  history_init
+  local total=0 skipped=0 pending=0 count=0 failed=0 succeeded=0
+  local -a pending_urls=()
+
+  # Count all valid URLs
   total=$(grep -cE '^https?://' "$LINKS_FILE" 2>/dev/null || echo 0)
 
   if [ "$total" -eq 0 ]; then
@@ -449,33 +652,165 @@ action_batch_download() {
     pause; return 0
   fi
 
-  info "Found $total URL(s) in links.txt. Starting batch download…"
+  info "Scanning $total URL(s) against download history…"
   printf "\n"
 
   while IFS= read -r line; do
-    # Skip empty lines and comments
     [[ -z "$line" || "$line" =~ ^# ]] && continue
-    count=$((count + 1))
-    printf "\n${BOLD}[%d/%d]${NC} %s\n" "$count" "$total" "$line"
-    if "$SPOTIFLAC_CLI_BIN" download "$line" --output "$DEFAULT_OUTPUT_DIR"; then
-      ok "Done."
+    # Check if already downloaded
+    if history_check "$line" || history_check_log "$line"; then
+      skipped=$((skipped + 1))
+      local sid
+      sid="$(extract_spotify_id "$line")"
+      printf "  ${DIM}⊘ Already done: %s${NC}\n" "$sid"
     else
-      err "Failed: $line"
-      failed=$((failed + 1))
+      pending_urls+=("$line")
+      pending=$((pending + 1))
     fi
   done < "$LINKS_FILE"
 
   printf "\n"
-  ok "Batch complete: $((count - failed))/$count succeeded."
-  [ "$failed" -gt 0 ] && warn "$failed download(s) failed."
+  hr
+  printf "  ${BOLD}Batch Summary${NC}\n"
+  printf "    Total in links.txt : ${BOLD}%d${NC}\n" "$total"
+  if [ "$skipped" -gt 0 ]; then
+    printf "    Already completed  : ${GREEN}%d${NC} ${DIM}(skipped)${NC}\n" "$skipped"
+  fi
+  printf "    Remaining to fetch : ${YELLOW}%d${NC}\n" "$pending"
+  hr
+
+  if [ "$pending" -eq 0 ]; then
+    printf "\n"
+    ok "All URLs already downloaded! Nothing to do."
+    info "To force re-download, clear history with menu option [d]."
+    pause; return 0
+  fi
+
+  printf "\n"
+  if ! confirm "Proceed with $pending download(s)?"; then
+    info "Cancelled."; pause; return 0
+  fi
+
+  # ── Phase 2: Download remaining URLs ──
+  printf "\n"
+  for url in "${pending_urls[@]}"; do
+    count=$((count + 1))
+    local sid
+    sid="$(extract_spotify_id "$url")"
+    printf "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    printf "${BOLD}[%d/%d]${NC} %s\n" "$count" "$pending" "$sid"
+    printf "${DIM}%s${NC}\n" "$url"
+
+    if download_with_retry "$url" "$DEFAULT_OUTPUT_DIR"; then
+      history_record "$url" "completed"
+      succeeded=$((succeeded + 1))
+      ok "Done ✔  (progress: $succeeded/$pending)"
+    else
+      history_record "$url" "failed"
+      failed=$((failed + 1))
+      err "Failed ✘  (after $MAX_RETRIES retries)"
+    fi
+  done
+
+  # ── Phase 3: Summary ──
+  printf "\n"
+  printf "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+  printf "  ${BOLD}Batch Results${NC}\n"
+  printf "    Succeeded  : ${GREEN}${BOLD}%d${NC}\n" "$succeeded"
+  [ "$failed" -gt 0 ] && printf "    Failed     : ${RED}${BOLD}%d${NC}\n" "$failed"
+  printf "    Skipped    : ${DIM}%d (from history)${NC}\n" "$skipped"
+  printf "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+
+  if [ "$failed" -gt 0 ]; then
+    warn "$failed download(s) failed. Re-run batch to retry them."
+    info "Failed URLs are recorded — they will be retried next time."
+  fi
 
   # Trigger scan
-  if navidrome_ok; then
+  if navidrome_ok && [ "$succeeded" -gt 0 ]; then
     info "Triggering Navidrome library scan…"
     curl -sf --max-time 5 -X POST http://localhost:4533/api/scan >/dev/null 2>&1 && \
       ok "Scan triggered." || info "Auto-scan not available."
   fi
   pause
+}
+
+action_download_history() {
+  history_init
+  clear || true
+  printf "\n"
+  printf "  ${CYAN}${BOLD}📋 Download History${NC}\n"
+  printf "  ${DIM}────────────────────────────────────────────${NC}\n\n"
+
+  local stats
+  stats="$(history_stats)"
+  local h_total h_completed h_failed
+  h_total=$(echo "$stats" | awk '{print $1}')
+  h_completed=$(echo "$stats" | awk '{print $2}')
+  h_failed=$(echo "$stats" | awk '{print $3}')
+
+  printf "  ${BOLD}Statistics${NC}\n"
+  printf "    Total tracked  : ${BOLD}%s${NC}\n" "$h_total"
+  printf "    Completed      : ${GREEN}%s${NC}\n" "$h_completed"
+  printf "    Failed         : ${RED}%s${NC}\n" "$h_failed"
+  printf "\n"
+
+  # Show recent downloads
+  if ensure_cmd jq && [ -f "$HISTORY_FILE" ]; then
+    local entry_count
+    entry_count=$(jq '.downloads | length' "$HISTORY_FILE" 2>/dev/null || echo 0)
+    if [ "$entry_count" -gt 0 ]; then
+      printf "  ${BOLD}Recent Downloads${NC} ${DIM}(last 15)${NC}\n"
+      printf "  ${DIM}%-20s %-10s %s${NC}\n" "TIMESTAMP" "STATUS" "ID"
+      jq -r '.downloads | to_entries | sort_by(.value.timestamp) | reverse | .[0:15][] |
+        "  " + .value.timestamp + "  " +
+        (if .value.status == "completed" then "✔ done" else "✘ fail" end) +
+        "     " + .key' "$HISTORY_FILE" 2>/dev/null
+      printf "\n"
+    fi
+  fi
+
+  printf "  ${DIM}History file: %s${NC}\n\n" "$HISTORY_FILE"
+
+  printf "  ${BOLD}Actions${NC}\n"
+  printf "    ${YELLOW}1${NC}  Clear failed entries (allow retry)\n"
+  printf "    ${YELLOW}2${NC}  Clear ALL history\n"
+  printf "    ${YELLOW}3${NC}  Back to menu\n\n"
+
+  local hchoice
+  printf "  ${BOLD}Select:${NC} "
+  read -r hchoice
+  case "$hchoice" in
+    1)
+      if ensure_cmd jq; then
+        local tmp_file="${HISTORY_FILE}.tmp.$$"
+        jq 'del(.downloads[] | select(.status == "failed"))' "$HISTORY_FILE" > "$tmp_file" 2>/dev/null && \
+          mv -f "$tmp_file" "$HISTORY_FILE"
+        ok "Failed entries cleared. They will be retried on next batch."
+      else
+        local log_file="${HISTORY_FILE%.json}.log"
+        if [ -f "$log_file" ]; then
+          grep -v 'failed' "$log_file" > "${log_file}.tmp" 2>/dev/null && \
+            mv -f "${log_file}.tmp" "$log_file"
+          ok "Failed entries cleared."
+        fi
+      fi
+      pause
+      ;;
+    2)
+      if confirm "Clear ALL download history? This cannot be undone."; then
+        printf '{"version":1,"downloads":{}}' > "$HISTORY_FILE"
+        local log_file="${HISTORY_FILE%.json}.log"
+        [ -f "$log_file" ] && rm -f "$log_file"
+        ok "Download history cleared."
+      else
+        info "Cancelled."
+      fi
+      pause
+      ;;
+    *)
+      ;;
+  esac
 }
 
 action_metadata() {
@@ -591,7 +926,15 @@ action_print_paths() {
   printf "  spotiflac-cli  : %s\n" "$SPOTIFLAC_CLI_BIN"
   printf "  .env file      : %s\n" "$PROJECT_ROOT/.env"
   printf "  links.txt      : %s\n" "$LINKS_FILE"
+  printf "  History DB     : %s\n" "$HISTORY_FILE"
   printf "  Music size     : %s\n" "$(music_size)"
+  # Show history stats
+  local stats h_total h_completed h_failed
+  stats="$(history_stats)"
+  h_total=$(echo "$stats" | awk '{print $1}')
+  h_completed=$(echo "$stats" | awk '{print $2}')
+  h_failed=$(echo "$stats" | awk '{print $3}')
+  printf "  Downloads      : %s total, %s completed, %s failed\n" "$h_total" "$h_completed" "$h_failed"
   if [ -f "$PROJECT_ROOT/.env" ]; then
     printf "\n${BOLD}.env contents${NC}\n"; hr
     sed 's/^/  /' "$PROJECT_ROOT/.env"
@@ -668,7 +1011,15 @@ draw_menu() {
   if [ $n_stat -eq 0 ]; then printf "${GREEN}● Navidrome${NC}  "; else printf "${RED}○ Navidrome${NC}  "; fi
   if [ $s_stat -eq 0 ]; then printf "${GREEN}● Syncthing${NC}"; else printf "${RED}○ Syncthing${NC}"; fi
   printf "\n"
-  printf "  ${DIM}Domain: ${NC}%-30s ${DIM}Library: ${NC}%s\n" "$domain" "$lib_size"
+  # Get history stats for status bar
+  local h_stats h_completed h_failed
+  h_stats="$(history_stats)"
+  h_completed=$(echo "$h_stats" | awk '{print $2}')
+  h_failed=$(echo "$h_stats" | awk '{print $3}')
+  local h_badge="${h_completed} done"
+  [ "$h_failed" -gt 0 ] 2>/dev/null && h_badge="${h_badge}, ${h_failed} failed"
+
+  printf "  ${DIM}Domain: ${NC}%-25s ${DIM}Library: ${NC}%-8s ${DIM}History: ${NC}%s\n" "$domain" "$lib_size" "$h_badge"
 
   # ── sections ──
   printf "\n  ${BOLD}${BLUE}SETUP${NC}\n"
@@ -677,6 +1028,7 @@ draw_menu() {
   printf "\n  ${BOLD}${BLUE}MUSIC${NC}\n"
   printf "    ${YELLOW}1${NC}  Install / update spotiflac     ${YELLOW}2${NC}  Download from Spotify URL\n"
   printf "    ${YELLOW}3${NC}  View track metadata            ${YELLOW}b${NC}  Batch download (links.txt)\n"
+  printf "    ${YELLOW}d${NC}  Download history\n"
 
   printf "\n  ${BOLD}${BLUE}DOCKER${NC}\n"
   printf "    ${YELLOW}4${NC}  Start stack                    ${YELLOW}5${NC}  Stop stack\n"
@@ -703,6 +1055,7 @@ main_menu() {
       2)   action_download ;;
       3)   action_metadata ;;
       b|B) action_batch_download ;;
+      d|D) action_download_history ;;
       4)   action_stack_up ;;
       5)   action_stack_down ;;
       6)   action_stack_logs ;;

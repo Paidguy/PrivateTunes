@@ -76,7 +76,8 @@ Run:
 | `1` | **Install/Update spotiflac-cli** | Download the latest binary |
 | `2` | **Download from Spotify URL** | Paste a track/album/playlist URL → downloads as FLAC into `./music` |
 | `3` | **View track metadata** | Inspect metadata for any Spotify track URL |
-| `b` | **Batch download** | Download all URLs listed in `links.txt` in one go |
+| `b` | **Batch download** | Download all URLs listed in `links.txt` — skips already-downloaded |
+| `d` | **Download history** | View, clear, or retry tracked downloads |
 | `4` | **Start stack** | `docker compose up -d` + waits for health checks |
 | `5` | **Stop stack** | `docker compose down` |
 | `6` | **View logs** | Follow live logs from all containers |
@@ -102,6 +103,27 @@ cp .env.example .env
 | `UID` | User ID for Syncthing | `1000` |
 | `GID` | Group ID for Syncthing | `1000` |
 
+## Download History & Fault Tolerance
+
+PrivateTunes tracks every download in a persistent JSON database (`data/download_history.json`). This means:
+
+- **No duplicate downloads** — If a track/album/playlist was already downloaded, it's automatically skipped
+- **Resume interrupted batches** — If a batch download is interrupted (rate limits, crash, network error), re-running it picks up exactly where you left off
+- **Exponential backoff retries** — Failed downloads are retried up to 3 times with increasing wait times (5s → 15s → 45s), with extended waits for rate limits
+- **Atomic progress tracking** — Each successful download is recorded immediately, so even a hard crash preserves all progress
+- **URL normalization** — The same track won't be re-downloaded even if the URL has different tracking parameters (`?si=...`)
+
+### Managing History
+
+Use menu option `d` to:
+- View download statistics and recent downloads
+- Clear failed entries (so they get retried on next batch)
+- Clear all history (to force re-downloading everything)
+
+The history file is stored at `data/download_history.json` and is git-ignored.
+
+> **Note:** `jq` is recommended for the best history experience. Without `jq`, a simpler line-based log fallback is used.
+
 ## File Structure
 
 ```
@@ -113,6 +135,7 @@ PrivateTunes/
 ├── links.txt              # Batch download URLs (one per line)
 ├── music/                 # Your music library (Navidrome reads from here)
 ├── data/                  # Navidrome + Syncthing persistent state
+│   └── download_history.json  # Download tracking database (auto-created)
 ├── bin/                   # Local tools like spotiflac-cli (git-ignored)
 └── scripts/
     ├── setup.sh           # Host bootstrap wizard

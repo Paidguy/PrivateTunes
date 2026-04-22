@@ -8,6 +8,11 @@ data/*
 !music/.gitkeep
 !data/.gitkeep
 
+# Download history (user-specific state)
+data/download_history.json
+data/download_history.log
+data/.history.lock
+
 # Ignore environment files with secrets
 .env
 
