@@ -7,6 +7,9 @@ Self-hosted music streaming with a **pure CLI download workflow** (no VM, no GUI
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Navidrome](https://img.shields.io/badge/Powered%20by-Navidrome-00C9FF)](https://www.navidrome.org/)
+[![Author](https://img.shields.io/badge/by-%40Paidguy-blueviolet)](https://github.com/Paidguy)
+
+**Created and maintained by [@Paidguy](https://github.com/Paidguy)**
 
 </div>
 
