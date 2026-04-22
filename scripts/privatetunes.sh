@@ -61,15 +61,7 @@ docker_ok()    { command -v docker >/dev/null 2>&1 && docker compose version >/d
 navidrome_ok() { curl -sf --max-time 2 http://localhost:4533/ping >/dev/null 2>&1; }
 syncthing_ok() { curl -sf --max-time 2 http://localhost:8384/ >/dev/null 2>&1; }
 
-status_badge() {
-  local name="$1" padded
-  padded="$(printf '%-12s' "$name")"
-  if [ "$2" -eq 0 ]; then
-    printf "${GREEN}${BOLD}●${NC} %s" "$padded"
-  else
-    printf "${RED}○${NC} %s" "$padded"
-  fi
-}
+
 
 music_size() {
   if [ -d "$DEFAULT_OUTPUT_DIR" ]; then
@@ -141,23 +133,18 @@ ensure_env_file() {
 # ── domain onboarding wizard ──────────────────────────────────────────────────
 onboard_domain() {
   clear || true
-  printf "${CYAN}"
-  printf '╔══════════════════════════════════════════════════════════╗\n'
-  printf '║   🌐  Domain Setup Wizard                               ║\n'
-  printf '╚══════════════════════════════════════════════════════════╝\n'
-  printf "${NC}\n"
-
-  info "Caddy needs a public domain name to issue a free HTTPS certificate."
-  info "A free subdomain from DuckDNS works perfectly:"
-  printf "\n  ${BLUE}${BOLD}https://www.duckdns.org${NC}\n\n"
-  info "Steps to get a free DuckDNS domain:"
-  printf "    1. Visit https://www.duckdns.org and log in with GitHub/Google\n"
-  printf "    2. Enter a subdomain name and click 'add domain'\n"
-  printf "    3. Point the domain to this server's public IP\n"
-  printf "    4. Enter your full domain below (e.g. mymusic.duckdns.org)\n\n"
-  info "You can skip this and set a real domain later. The stack will still"
-  info "run locally on http://localhost:4533 without a domain."
   printf "\n"
+  printf "  ${CYAN}${BOLD}🌐 Domain Setup${NC}\n"
+  printf "  ${DIM}────────────────────────────────────────────${NC}\n\n"
+
+  info "Caddy needs a public domain for automatic HTTPS."
+  info "A free DuckDNS subdomain works great:\n"
+  printf "    ${BOLD}1.${NC} Go to ${BLUE}https://www.duckdns.org${NC} and log in\n"
+  printf "    ${BOLD}2.${NC} Create a subdomain (e.g. ${BOLD}mymusic${NC})\n"
+  printf "    ${BOLD}3.${NC} Point it to this server's public IP\n"
+  printf "    ${BOLD}4.${NC} Enter your domain below\n\n"
+  info "No domain yet? Press Enter to skip — Navidrome will"
+  info "still work locally at http://localhost:4533\n"
 
   ensure_env_file
 
@@ -165,10 +152,10 @@ onboard_domain() {
   current_domain="$(grep '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 'your-domain.duckdns.org')"
 
   local new_domain
-  new_domain="$(prompt_val "Your domain name" "$current_domain")"
+  new_domain="$(prompt_val "Domain name (e.g. mymusic.duckdns.org)" "$current_domain")"
 
   if [ -z "$new_domain" ] || [ "$new_domain" = "your-domain.duckdns.org" ]; then
-    warn "Keeping placeholder domain. HTTPS won't work until you set a real one."
+    warn "Keeping placeholder — HTTPS disabled until you set a real domain."
     new_domain="your-domain.duckdns.org"
   else
     ok "Domain → $new_domain"
@@ -181,7 +168,7 @@ onboard_domain() {
   fi
 
   printf "\n"
-  info "Syncthing uses your system UID/GID to manage file ownership."
+  info "Syncthing uses your system UID/GID for file ownership."
   local uid_val gid_val
   uid_val="$(prompt_val "UID" "$(id -u)")"
   gid_val="$(prompt_val "GID" "$(id -g)")"
@@ -199,73 +186,218 @@ onboard_domain() {
 
   printf "\n"
   ok ".env saved."
-  info "If you changed the domain, restart the stack (option 4) for Caddy to"
-  info "pick up the new certificate."
+  pause
+}
+
+# ── comprehensive onboarding wizard ──────────────────────────────────────────
+run_onboarding() {
+  local total_steps=5 step=0
+
+  # ── Step 1: Welcome ──
+  step=$((step + 1))
+  clear || true
+  printf "\n"
+  printf "  ${CYAN}${BOLD}🎵 PrivateTunes — Setup Wizard${NC}  ${DIM}[${step}/${total_steps}]${NC}\n"
+  printf "  ${DIM}────────────────────────────────────────────${NC}\n\n"
+  printf "  Welcome! This wizard will walk you through:\n\n"
+  printf "    ${GREEN}1.${NC} Configure your domain & .env\n"
+  printf "    ${GREEN}2.${NC} Install spotiflac-cli (Spotify downloader)\n"
+  printf "    ${GREEN}3.${NC} Create required directories\n"
+  printf "    ${GREEN}4.${NC} Start the Docker stack\n"
+  printf "    ${GREEN}5.${NC} Set up your Navidrome admin account\n\n"
+  printf "  ${DIM}You can skip any step. Run this again anytime via [s].${NC}\n\n"
+
+  if ! confirm "Ready to begin?"; then
+    info "Skipped. Run [s] from the menu anytime."
+    pause; return 0
+  fi
+
+  # ── Step 2: Domain + .env ──
+  step=$((step + 1))
+  clear || true
+  printf "\n"
+  printf "  ${CYAN}${BOLD}🌐 Domain & Environment${NC}  ${DIM}[${step}/${total_steps}]${NC}\n"
+  printf "  ${DIM}────────────────────────────────────────────${NC}\n\n"
+
+  ensure_env_file
+
+  info "Caddy provides automatic HTTPS if you have a domain."
+  info "Get a free one at ${BLUE}https://www.duckdns.org${NC}\n"
+  info "No domain? Just press Enter to skip.\n"
+
+  local current_domain new_domain
+  current_domain="$(grep '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 'your-domain.duckdns.org')"
+  new_domain="$(prompt_val "Domain (e.g. mymusic.duckdns.org)" "$current_domain")"
+
+  if [ -z "$new_domain" ] || [ "$new_domain" = "your-domain.duckdns.org" ]; then
+    warn "No domain set — you can still use http://localhost:4533"
+    new_domain="your-domain.duckdns.org"
+  else
+    ok "Domain → $new_domain"
+  fi
+
+  if grep -q '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null; then
+    sed -i "s|^DOMAIN=.*|DOMAIN=$new_domain|" "$PROJECT_ROOT/.env"
+  else
+    echo "DOMAIN=$new_domain" >> "$PROJECT_ROOT/.env"
+  fi
+
+  local uid_val gid_val
+  uid_val="$(prompt_val "UID for Syncthing" "$(id -u)")"
+  gid_val="$(prompt_val "GID for Syncthing" "$(id -g)")"
+
+  if grep -q '^UID=' "$PROJECT_ROOT/.env" 2>/dev/null; then
+    sed -i "s|^UID=.*|UID=$uid_val|" "$PROJECT_ROOT/.env"
+  else
+    echo "UID=$uid_val" >> "$PROJECT_ROOT/.env"
+  fi
+  if grep -q '^GID=' "$PROJECT_ROOT/.env" 2>/dev/null; then
+    sed -i "s|^GID=.*|GID=$gid_val|" "$PROJECT_ROOT/.env"
+  else
+    echo "GID=$gid_val" >> "$PROJECT_ROOT/.env"
+  fi
+  ok ".env configured."
+
+  # ── Step 3: spotiflac-cli ──
+  step=$((step + 1))
+  clear || true
+  printf "\n"
+  printf "  ${CYAN}${BOLD}📦 spotiflac-cli${NC}  ${DIM}[${step}/${total_steps}]${NC}\n"
+  printf "  ${DIM}────────────────────────────────────────────${NC}\n\n"
+
+  if [ -x "$SPOTIFLAC_CLI_BIN" ]; then
+    ok "spotiflac-cli already installed."
+    if confirm "Re-download / update?"; then
+      install_spotiflac_cli
+    fi
+  else
+    info "spotiflac-cli downloads music from Spotify as FLAC files."
+    if confirm "Install spotiflac-cli now?"; then
+      install_spotiflac_cli
+    else
+      warn "Skipped — you won't be able to download music until installed."
+    fi
+  fi
+
+  # ── Step 4: Directories + Docker stack ──
+  step=$((step + 1))
+  clear || true
+  printf "\n"
+  printf "  ${CYAN}${BOLD}🐳 Docker Stack${NC}  ${DIM}[${step}/${total_steps}]${NC}\n"
+  printf "  ${DIM}────────────────────────────────────────────${NC}\n\n"
+
+  mkdir -p "$PROJECT_ROOT/music" "$PROJECT_ROOT/data/navidrome" "$PROJECT_ROOT/data/syncthing" "$BIN_DIR"
+  ok "Directories created (music/, data/, bin/)."
+
+  if ! docker_ok; then
+    err "Docker not found. Install Docker first, then re-run setup."
+    info "Install guide: https://docs.docker.com/engine/install/"
+    info "Or run: ${BOLD}sudo $PROJECT_ROOT/scripts/setup.sh${NC}"
+    pause
+  else
+    ok "Docker found: $(docker --version 2>/dev/null | head -c 50)"
+    if confirm "Start the Docker stack now?"; then
+      cd "$PROJECT_ROOT"
+      docker compose up -d
+      printf "\n"
+      info "Waiting for Navidrome…"
+      local retries=18
+      until curl -sf --max-time 2 http://localhost:4533/ping >/dev/null 2>&1; do
+        retries=$((retries - 1))
+        if [ "$retries" -le 0 ]; then
+          warn "Navidrome didn't respond in time."
+          info "Check: docker compose logs navidrome"
+          break
+        fi
+        printf "."
+        sleep 10
+      done
+      printf "\n"
+      if navidrome_ok; then
+        ok "Stack is running!"
+      fi
+    else
+      info "Skipped. Start later with menu option [4]."
+    fi
+  fi
+
+  # ── Step 5: Navidrome admin ──
+  step=$((step + 1))
+  clear || true
+  printf "\n"
+  printf "  ${CYAN}${BOLD}👤 Navidrome Admin Account${NC}  ${DIM}[${step}/${total_steps}]${NC}\n"
+  printf "  ${DIM}────────────────────────────────────────────${NC}\n\n"
+
+  if navidrome_ok; then
+    ok "Navidrome is running!\n"
+    printf "  Open this URL in your browser to create your admin account:\n\n"
+    printf "    ${BOLD}${GREEN}→ http://localhost:4533${NC}\n\n"
+    local nd_domain
+    nd_domain="$(grep '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2)"
+    if [ -n "$nd_domain" ] && [ "$nd_domain" != "your-domain.duckdns.org" ]; then
+      printf "    ${BOLD}${GREEN}→ https://${nd_domain}${NC}\n\n"
+    fi
+    printf "  ${DIM}The first user you create becomes the admin.${NC}\n"
+    printf "  ${DIM}Choose a strong password — this controls your music library.${NC}\n"
+  else
+    warn "Navidrome is not running yet."
+    info "Start the stack first (menu option [4]), then open:"
+    printf "\n    ${BOLD}http://localhost:4533${NC}\n\n"
+    info "The first user you create will be the admin."
+  fi
+
+  # ── Done ──
+  printf "\n"
+  printf "  ${CYAN}${BOLD}✅ Setup Complete!${NC}\n"
+  printf "  ${DIM}────────────────────────────────────────────${NC}\n\n"
+  printf "  ${BOLD}What's next:${NC}\n"
+  printf "    • Create your admin account at ${BLUE}http://localhost:4533${NC}\n"
+  printf "    • Download music with option ${YELLOW}2${NC} or ${YELLOW}b${NC}\n"
+  printf "    • Connect Syncthing at ${BLUE}http://localhost:8384${NC}\n\n"
+  printf "  ${DIM}PrivateTunes v${VERSION} • by @Paidguy${NC}\n"
   pause
 }
 
 # ── help screen ───────────────────────────────────────────────────────────────
 show_help() {
   clear || true
-  printf "${CYAN}"
-  printf '╔══════════════════════════════════════════════════════════╗\n'
-  printf '║   ❓  PrivateTunes — Help                               ║\n'
-  printf '╚══════════════════════════════════════════════════════════╝\n'
-  printf "${NC}\n"
+  printf "\n"
+  printf "  ${CYAN}${BOLD}❓ PrivateTunes — Help${NC}\n"
+  printf "  ${DIM}────────────────────────────────────────────${NC}\n\n"
 
-  printf "${BOLD}${BLUE}OVERVIEW${NC}\n"
-  hr
-  printf "  PrivateTunes lets you self-host a personal music server\n"
-  printf "  (Navidrome) with automatic HTTPS (Caddy) and optional sync\n"
-  printf "  across devices (Syncthing). Music is downloaded via spotiflac-cli.\n\n"
+  printf "  Self-hosted music server: Navidrome + Caddy (HTTPS) + Syncthing.\n"
+  printf "  Music downloaded via spotiflac-cli from Spotify URLs.\n\n"
 
-  printf "${BOLD}${BLUE}OPTION GUIDE${NC}\n"
-  hr
-  printf "  ${BOLD}[s]${NC} Full Setup       Run the automated setup wizard (installs Docker,\n"
-  printf "                     downloads spotiflac-cli, configures .env, starts stack).\n\n"
-  printf "  ${BOLD}[1]${NC} Install/Update   Download the latest spotiflac-cli binary.\n\n"
-  printf "  ${BOLD}[2]${NC} Download music   Paste any Spotify track, album, or playlist URL\n"
-  printf "                     to download it as FLAC into ./music/.\n\n"
-  printf "  ${BOLD}[3]${NC} Track metadata   View metadata for a Spotify track URL.\n\n"
-  printf "  ${BOLD}[b]${NC} Batch download   Download all URLs from links.txt in one go.\n\n"
-  printf "  ${BOLD}[4]${NC} Start stack      docker compose up -d  (also waits for Navidrome).\n\n"
-  printf "  ${BOLD}[5]${NC} Stop stack       docker compose down.\n\n"
-  printf "  ${BOLD}[6]${NC} Stack logs       Follow live logs from all containers.\n\n"
-  printf "  ${BOLD}[7]${NC} Stack status     Show container state + health checks.\n\n"
-  printf "  ${BOLD}[8]${NC} Restart Navidrome Restart only the Navidrome container.\n\n"
-  printf "  ${BOLD}[9]${NC} Domain setup     Interactive wizard to set your domain name and\n"
-  printf "                     UID/GID in .env. Guides you through DuckDNS.\n\n"
-  printf "  ${BOLD}[c]${NC} Backup config    Archive .env, Caddyfile, docker-compose.yml.\n\n"
-  printf "  ${BOLD}[p]${NC} Paths            Show all important paths and current .env.\n\n"
-  printf "  ${BOLD}[h]${NC} Help             Show this screen.\n\n"
-  printf "  ${BOLD}[0]${NC} Exit             Quit the menu.\n\n"
+  printf "  ${BOLD}${BLUE}COMMANDS${NC}\n"
+  printf "  ${YELLOW}s${NC}  Setup wizard — domain, spotiflac-cli, Docker, Navidrome admin\n"
+  printf "  ${YELLOW}1${NC}  Install/update spotiflac-cli binary\n"
+  printf "  ${YELLOW}2${NC}  Download a Spotify track/album/playlist as FLAC\n"
+  printf "  ${YELLOW}3${NC}  View metadata for a Spotify track\n"
+  printf "  ${YELLOW}b${NC}  Batch download all URLs from links.txt\n"
+  printf "  ${YELLOW}4${NC}  Start stack (docker compose up -d)\n"
+  printf "  ${YELLOW}5${NC}  Stop stack (docker compose down)\n"
+  printf "  ${YELLOW}6${NC}  Follow live container logs\n"
+  printf "  ${YELLOW}7${NC}  Show container status + health checks\n"
+  printf "  ${YELLOW}8${NC}  Restart only Navidrome\n"
+  printf "  ${YELLOW}9${NC}  Domain setup wizard (set domain + UID/GID)\n"
+  printf "  ${YELLOW}c${NC}  Backup .env, Caddyfile, docker-compose.yml\n"
+  printf "  ${YELLOW}p${NC}  Show all paths + current .env\n\n"
 
-  printf "${BOLD}${BLUE}KEY PORTS${NC}\n"
-  hr
-  printf "  4533  Navidrome web UI + Subsonic API\n"
-  printf "  8384  Syncthing web UI\n"
-  printf "  80    Caddy HTTP (redirects to HTTPS)\n"
-  printf "  443   Caddy HTTPS\n\n"
+  printf "  ${BOLD}${BLUE}PORTS${NC}\n"
+  printf "  4533  Navidrome    8384  Syncthing    80/443  Caddy\n\n"
 
-  printf "${BOLD}${BLUE}TROUBLESHOOTING${NC}\n"
-  hr
-  printf "  Music not scanning?   Restart Navidrome (option 8) or trigger a\n"
-  printf "                        manual library scan in the Navidrome web UI.\n\n"
-  printf "  HTTPS not working?    Check that your DOMAIN is correct in .env,\n"
-  printf "                        ports 80/443 are open, and DNS points to this\n"
-  printf "                        server. Then restart the stack (option 4).\n\n"
-  printf "  Container issues?     Use option 6 to view logs.\n\n"
+  printf "  ${BOLD}${BLUE}TROUBLESHOOTING${NC}\n"
+  printf "  Music not scanning?  → Restart Navidrome [8] or scan in web UI\n"
+  printf "  HTTPS broken?        → Check DOMAIN in .env, open 80/443, restart [4]\n"
+  printf "  Container issues?    → View logs [6]\n\n"
 
-  printf "${DIM}  PrivateTunes v${VERSION}  •  by @Paidguy  •  github.com/Paidguy/PrivateTunes${NC}\n\n"
+  printf "  ${DIM}v${VERSION} • by @Paidguy • github.com/Paidguy/PrivateTunes${NC}\n"
   pause
 }
 
 # ── menu actions ──────────────────────────────────────────────────────────────
 action_full_setup() {
-  printf "\n"
-  info "Delegating to setup.sh (may ask for sudo)…"
-  sudo "$PROJECT_ROOT/scripts/setup.sh" || { err "Setup encountered errors."; }
-  pause
+  run_onboarding
 }
 
 action_install_or_update() {
@@ -470,29 +602,44 @@ action_print_paths() {
 # ── first-run onboarding check ────────────────────────────────────────────────
 maybe_first_run_onboard() {
   local domain
-  domain="$(grep '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2 || echo '')"
+  domain="$(get_env_val DOMAIN '')"
   if [ ! -f "$PROJECT_ROOT/.env" ] || [ -z "$domain" ] || [ "$domain" = "your-domain.duckdns.org" ]; then
     clear || true
-    printf "${CYAN}"
-    printf '╔══════════════════════════════════════════════════════════╗\n'
-    printf '║                                                          ║\n'
-    printf '║   🎵  Welcome to PrivateTunes!                          ║\n'
-    printf '║                                                          ║\n'
-    printf '║      Your private, self-hosted music server.             ║\n'
-    printf '║      Created by @Paidguy                                 ║\n'
-    printf '║      github.com/Paidguy/PrivateTunes                     ║\n'
-    printf '║                                                          ║\n'
-    printf '╚══════════════════════════════════════════════════════════╝\n'
-    printf "${NC}\n"
-    info "It looks like this is your first time running PrivateTunes,"
-    info "or your domain hasn't been configured yet."
     printf "\n"
-    if confirm "Run the quick onboarding wizard now?"; then
-      ensure_env_file
-      onboard_domain
+    printf "  ${CYAN}${BOLD}🎵 Welcome to PrivateTunes!${NC}\n\n"
+    printf "  Your private, self-hosted music server.\n"
+    printf "  ${DIM}by @Paidguy • github.com/Paidguy/PrivateTunes${NC}\n\n"
+    info "It looks like this is your first time here."
+    printf "\n"
+    if confirm "Run the setup wizard?"; then
+      run_onboarding
     else
-      info "Skipped. You can run it anytime via option [9] in the menu."
+      ensure_env_file
+      info "Skipped. Press [s] in the menu anytime."
+      sleep 1
     fi
+  fi
+}
+
+# ── env helpers ───────────────────────────────────────────────────────────────
+get_env_val() {
+  local key="$1" default="${2:-}"
+  if [ -f "$PROJECT_ROOT/.env" ]; then
+    local val
+    val="$(grep "^${key}=" "$PROJECT_ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2-)"
+    printf '%s' "${val:-$default}"
+  else
+    printf '%s' "$default"
+  fi
+}
+
+set_env_val() {
+  local key="$1" value="$2"
+  ensure_env_file
+  if grep -q "^${key}=" "$PROJECT_ROOT/.env" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=$value|" "$PROJECT_ROOT/.env"
+  else
+    echo "${key}=$value" >> "$PROJECT_ROOT/.env"
   fi
 }
 
@@ -504,48 +651,41 @@ draw_menu() {
   syncthing_ok && s_stat=0
 
   local domain lib_size
-  domain="$(grep '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 'not configured')"
-  [ -z "$domain" ] && domain="not configured"
+  domain="$(get_env_val DOMAIN 'not set')"
+  [ "$domain" = "your-domain.duckdns.org" ] && domain="not configured"
   lib_size="$(music_size)"
 
-  # Truncate domain for display (max 40 chars)
-  if [ ${#domain} -gt 40 ]; then
-    domain="${domain:0:37}..."
-  fi
-
   clear || true
-  printf "${CYAN}"
-  printf '╔══════════════════════════════════════════════════════════╗\n'
-  printf '║                                                          ║\n'
-  printf '║   🎵  PrivateTunes                        by @Paidguy   ║\n'
-  printf '║       github.com/Paidguy/PrivateTunes      v%-6s      ║\n' "$VERSION"
-  printf '║                                                          ║\n'
-  printf '╠══════════════════════════════════╦═══════════════════════╣\n'
-  printf '║                                  ║  STATUS               ║\n'
-  printf "║  ${BOLD}${YELLOW}[s]${NC}${CYAN} Full Setup / Onboarding   ${CYAN}║  "; status_badge "Docker"    $d_stat; printf "   ${CYAN}║\n"
-  printf "║  ${BOLD}${YELLOW}[h]${NC}${CYAN} Help                      ${CYAN}║  "; status_badge "Navidrome" $n_stat; printf "   ${CYAN}║\n"
-  printf "║                                  ║  "; status_badge "Syncthing" $s_stat; printf "   ${CYAN}║\n"
-  printf '╠══════════════════════════════════╩═══════════════════════╣\n'
-  printf "║  ${BOLD}MUSIC TOOLS${NC}${CYAN}                                          ║\n"
-  printf "║  ${BOLD}${YELLOW}[1]${NC}${CYAN} Install / Update spotiflac-cli                   ║\n"
-  printf "║  ${BOLD}${YELLOW}[2]${NC}${CYAN} Download music from Spotify URL                  ║\n"
-  printf "║  ${BOLD}${YELLOW}[3]${NC}${CYAN} View track metadata                              ║\n"
-  printf "║  ${BOLD}${YELLOW}[b]${NC}${CYAN} Batch download from links.txt                    ║\n"
-  printf '╠══════════════════════════════════════════════════════════╣\n'
-  printf "║  ${BOLD}DOCKER STACK${NC}${CYAN}                                         ║\n"
-  printf "║  ${BOLD}${YELLOW}[4]${NC}${CYAN} Start stack     ${BOLD}${YELLOW}[5]${NC}${CYAN} Stop stack                   ║\n"
-  printf "║  ${BOLD}${YELLOW}[6]${NC}${CYAN} View logs       ${BOLD}${YELLOW}[7]${NC}${CYAN} Stack status                 ║\n"
-  printf "║  ${BOLD}${YELLOW}[8]${NC}${CYAN} Restart Navidrome                                ║\n"
-  printf '╠══════════════════════════════════════════════════════════╣\n'
-  printf "║  ${BOLD}CONFIGURATION${NC}${CYAN}                                        ║\n"
-  printf "║  ${BOLD}${YELLOW}[9]${NC}${CYAN} Domain setup wizard                              ║\n"
-  printf "║  ${BOLD}${YELLOW}[c]${NC}${CYAN} Backup config       ${BOLD}${YELLOW}[p]${NC}${CYAN} Show paths / .env        ║\n"
-  printf "║  ${DIM}Domain:  %-48s${NC}${CYAN}║\n" "$domain"
-  printf "║  ${DIM}Library: %-48s${NC}${CYAN}║\n" "$lib_size"
-  printf '╠══════════════════════════════════════════════════════════╣\n'
-  printf "║  ${BOLD}${YELLOW}[0]${NC}${CYAN} Exit                                             ║\n"
-  printf '╚══════════════════════════════════════════════════════════╝\n'
-  printf "${NC}"
+
+  # ── header ──
+  printf "\n"
+  printf "  ${CYAN}${BOLD}🎵 PrivateTunes${NC}  ${DIM}v${VERSION}${NC}                 ${DIM}by @Paidguy${NC}\n"
+  printf "  ${DIM}github.com/Paidguy/PrivateTunes${NC}\n"
+
+  # ── status bar ──
+  printf "\n  "
+  if [ $d_stat -eq 0 ]; then printf "${GREEN}● Docker${NC}  "; else printf "${RED}○ Docker${NC}  "; fi
+  if [ $n_stat -eq 0 ]; then printf "${GREEN}● Navidrome${NC}  "; else printf "${RED}○ Navidrome${NC}  "; fi
+  if [ $s_stat -eq 0 ]; then printf "${GREEN}● Syncthing${NC}"; else printf "${RED}○ Syncthing${NC}"; fi
+  printf "\n"
+  printf "  ${DIM}Domain: ${NC}%-30s ${DIM}Library: ${NC}%s\n" "$domain" "$lib_size"
+
+  # ── sections ──
+  printf "\n  ${BOLD}${BLUE}SETUP${NC}\n"
+  printf "    ${YELLOW}s${NC}  Full setup & onboarding       ${YELLOW}h${NC}  Help\n"
+
+  printf "\n  ${BOLD}${BLUE}MUSIC${NC}\n"
+  printf "    ${YELLOW}1${NC}  Install / update spotiflac     ${YELLOW}2${NC}  Download from Spotify URL\n"
+  printf "    ${YELLOW}3${NC}  View track metadata            ${YELLOW}b${NC}  Batch download (links.txt)\n"
+
+  printf "\n  ${BOLD}${BLUE}DOCKER${NC}\n"
+  printf "    ${YELLOW}4${NC}  Start stack                    ${YELLOW}5${NC}  Stop stack\n"
+  printf "    ${YELLOW}6${NC}  View logs                      ${YELLOW}7${NC}  Stack status\n"
+  printf "    ${YELLOW}8${NC}  Restart Navidrome\n"
+
+  printf "\n  ${BOLD}${BLUE}CONFIG${NC}\n"
+  printf "    ${YELLOW}9${NC}  Domain wizard                  ${YELLOW}c${NC}  Backup config\n"
+  printf "    ${YELLOW}p${NC}  Show paths / .env              ${YELLOW}0${NC}  Exit\n"
 }
 
 main_menu() {
