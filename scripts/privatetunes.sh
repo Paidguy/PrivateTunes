@@ -1,14 +1,15 @@
 #!/bin/bash
 
-# Cloud Music Stack — Interactive CLI Menu
-# Created by @Paidguy  |  https://github.com/Paidguy/music
+# PrivateTunes — Interactive CLI Menu
+# Created by @Paidguy  |  https://github.com/Paidguy/PrivateTunes
 
-set -euo pipefail
+VERSION="1.0.0"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN_DIR="$PROJECT_ROOT/bin"
 SPOTIFLAC_CLI_BIN="$BIN_DIR/spotiflac-cli"
 DEFAULT_OUTPUT_DIR="$PROJECT_ROOT/music"
+LINKS_FILE="$PROJECT_ROOT/links.txt"
 
 # ── colour palette ────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
@@ -31,16 +32,14 @@ hr()   { printf "${CYAN}──────────────────�
 pause() { printf "\n"; read -r -p "  Press Enter to continue…" _; }
 
 prompt() {
-  local label="${1:?label required}"
-  local val
+  local label="${1:?label required}" val
   printf "  ${YELLOW}?${NC}  ${BOLD}%s${NC} " "$label"
   read -r val
   printf '%s' "$val"
 }
 
 prompt_val() {
-  local label="$1" default="${2:-}"
-  local val
+  local label="$1" default="${2:-}" val
   if [ -n "$default" ]; then
     printf "  ${YELLOW}?${NC}  ${BOLD}%s${NC} [%s]: " "$label" "$default"
   else
@@ -50,34 +49,31 @@ prompt_val() {
   printf '%s' "${val:-$default}"
 }
 
-# confirm Y/n (default YES)
 confirm() {
-  local msg="${1:-Continue?}"
-  local ans
+  local msg="${1:-Continue?}" ans
   printf "  ${YELLOW}?${NC}  ${BOLD}%s${NC} [Y/n] " "$msg"
   read -r ans
   case "$ans" in [nN]*) return 1 ;; *) return 0 ;; esac
 }
 
 # ── live status helpers ───────────────────────────────────────────────────────
-docker_ok() {
-  command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
-}
-
-navidrome_ok() {
-  curl -sf --max-time 2 http://localhost:4533/ping >/dev/null 2>&1
-}
-
-syncthing_ok() {
-  curl -sf --max-time 2 http://localhost:8384/ >/dev/null 2>&1
-}
+docker_ok()    { command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; }
+navidrome_ok() { curl -sf --max-time 2 http://localhost:4533/ping >/dev/null 2>&1; }
+syncthing_ok() { curl -sf --max-time 2 http://localhost:8384/ >/dev/null 2>&1; }
 
 status_badge() {
-  # $1 = label, $2 = 0|1 (ok=0, fail=1)
   if [ "$2" -eq 0 ]; then
     printf "${GREEN}${BOLD}● %-12s${NC}" "$1"
   else
     printf "${RED}${BOLD}○ %-12s${NC}" "$1"
+  fi
+}
+
+music_size() {
+  if [ -d "$DEFAULT_OUTPUT_DIR" ]; then
+    du -sh "$DEFAULT_OUTPUT_DIR" 2>/dev/null | awk '{print $1}'
+  else
+    echo "0B"
   fi
 }
 
@@ -104,7 +100,7 @@ require_docker() {
 # ── spotiflac-cli ─────────────────────────────────────────────────────────────
 install_spotiflac_cli() {
   local arch asset url
-  arch="$(detect_arch)"
+  arch="$(detect_arch)" || return 1
   asset="spotiflac-cli-linux-$arch"
   url="https://github.com/Superredstone/spotiflac-cli/releases/download/v1.0.0/$asset"
 
@@ -176,7 +172,6 @@ onboard_domain() {
     ok "Domain → $new_domain"
   fi
 
-  # Write DOMAIN
   if grep -q '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null; then
     sed -i "s|^DOMAIN=.*|DOMAIN=$new_domain|" "$PROJECT_ROOT/.env"
   else
@@ -212,13 +207,13 @@ show_help() {
   clear || true
   printf "${CYAN}"
   printf '╔══════════════════════════════════════════════════════════╗\n'
-  printf '║   ❓  Cloud Music Stack — Help                          ║\n'
+  printf '║   ❓  PrivateTunes — Help                               ║\n'
   printf '╚══════════════════════════════════════════════════════════╝\n'
   printf "${NC}\n"
 
   printf "${BOLD}${BLUE}OVERVIEW${NC}\n"
   hr
-  printf "  Cloud Music Stack lets you self-host a personal music server\n"
+  printf "  PrivateTunes lets you self-host a personal music server\n"
   printf "  (Navidrome) with automatic HTTPS (Caddy) and optional sync\n"
   printf "  across devices (Syncthing). Music is downloaded via spotiflac-cli.\n\n"
 
@@ -230,6 +225,7 @@ show_help() {
   printf "  ${BOLD}[2]${NC} Download music   Paste any Spotify track, album, or playlist URL\n"
   printf "                     to download it as FLAC into ./music/.\n\n"
   printf "  ${BOLD}[3]${NC} Track metadata   View metadata for a Spotify track URL.\n\n"
+  printf "  ${BOLD}[b]${NC} Batch download   Download all URLs from links.txt in one go.\n\n"
   printf "  ${BOLD}[4]${NC} Start stack      docker compose up -d  (also waits for Navidrome).\n\n"
   printf "  ${BOLD}[5]${NC} Stop stack       docker compose down.\n\n"
   printf "  ${BOLD}[6]${NC} Stack logs       Follow live logs from all containers.\n\n"
@@ -237,6 +233,7 @@ show_help() {
   printf "  ${BOLD}[8]${NC} Restart Navidrome Restart only the Navidrome container.\n\n"
   printf "  ${BOLD}[9]${NC} Domain setup     Interactive wizard to set your domain name and\n"
   printf "                     UID/GID in .env. Guides you through DuckDNS.\n\n"
+  printf "  ${BOLD}[c]${NC} Backup config    Archive .env, Caddyfile, docker-compose.yml.\n\n"
   printf "  ${BOLD}[p]${NC} Paths            Show all important paths and current .env.\n\n"
   printf "  ${BOLD}[h]${NC} Help             Show this screen.\n\n"
   printf "  ${BOLD}[0]${NC} Exit             Quit the menu.\n\n"
@@ -257,7 +254,7 @@ show_help() {
   printf "                        server. Then restart the stack (option 4).\n\n"
   printf "  Container issues?     Use option 6 to view logs.\n\n"
 
-  printf "${DIM}  Created by @Paidguy  •  https://github.com/Paidguy/music${NC}\n\n"
+  printf "${DIM}  PrivateTunes v${VERSION}  •  by @Paidguy  •  github.com/Paidguy/PrivateTunes${NC}\n\n"
   pause
 }
 
@@ -265,44 +262,102 @@ show_help() {
 action_full_setup() {
   printf "\n"
   info "Delegating to setup.sh (may ask for sudo)…"
-  sudo "$PROJECT_ROOT/scripts/setup.sh"
+  sudo "$PROJECT_ROOT/scripts/setup.sh" || { err "Setup encountered errors."; }
   pause
 }
 
 action_install_or_update() {
-  install_spotiflac_cli
+  install_spotiflac_cli || { err "Failed to install spotiflac-cli."; }
   pause
 }
 
 action_download() {
-  require_spotiflac_cli || return 1
+  require_spotiflac_cli || return 0
   mkdir -p "$DEFAULT_OUTPUT_DIR"
   local url
   url="$(prompt "Spotify URL (track / album / playlist):")"
   if [ -z "$url" ]; then
-    err "URL is required."; pause; return 1
+    err "URL is required."; pause; return 0
   fi
   printf "\n"
   info "Downloading to: $DEFAULT_OUTPUT_DIR"
-  "$SPOTIFLAC_CLI_BIN" download "$url" --output "$DEFAULT_OUTPUT_DIR"
-  ok "Done."
+  if "$SPOTIFLAC_CLI_BIN" download "$url" --output "$DEFAULT_OUTPUT_DIR"; then
+    ok "Download complete."
+    # Trigger Navidrome scan if running
+    if navidrome_ok; then
+      info "Triggering Navidrome library scan…"
+      curl -sf --max-time 5 -X POST http://localhost:4533/api/scan >/dev/null 2>&1 && \
+        ok "Scan triggered." || info "Auto-scan not available — Navidrome will pick it up on next scheduled scan."
+    fi
+  else
+    err "Download failed. Check the URL and try again."
+  fi
+  pause
+}
+
+action_batch_download() {
+  require_spotiflac_cli || return 0
+  mkdir -p "$DEFAULT_OUTPUT_DIR"
+
+  if [ ! -f "$LINKS_FILE" ]; then
+    err "links.txt not found at $LINKS_FILE"
+    info "Create it with one Spotify URL per line."
+    pause; return 0
+  fi
+
+  local count=0 total=0 failed=0
+  # Count non-empty, non-comment lines
+  total=$(grep -cE '^https?://' "$LINKS_FILE" 2>/dev/null || echo 0)
+
+  if [ "$total" -eq 0 ]; then
+    warn "No URLs found in links.txt."
+    info "Add Spotify URLs (one per line) and try again."
+    pause; return 0
+  fi
+
+  info "Found $total URL(s) in links.txt. Starting batch download…"
+  printf "\n"
+
+  while IFS= read -r line; do
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    count=$((count + 1))
+    printf "\n${BOLD}[%d/%d]${NC} %s\n" "$count" "$total" "$line"
+    if "$SPOTIFLAC_CLI_BIN" download "$line" --output "$DEFAULT_OUTPUT_DIR"; then
+      ok "Done."
+    else
+      err "Failed: $line"
+      failed=$((failed + 1))
+    fi
+  done < "$LINKS_FILE"
+
+  printf "\n"
+  ok "Batch complete: $((count - failed))/$count succeeded."
+  [ "$failed" -gt 0 ] && warn "$failed download(s) failed."
+
+  # Trigger scan
+  if navidrome_ok; then
+    info "Triggering Navidrome library scan…"
+    curl -sf --max-time 5 -X POST http://localhost:4533/api/scan >/dev/null 2>&1 && \
+      ok "Scan triggered." || info "Auto-scan not available."
+  fi
   pause
 }
 
 action_metadata() {
-  require_spotiflac_cli || return 1
+  require_spotiflac_cli || return 0
   local url
   url="$(prompt "Spotify track URL:")"
   if [ -z "$url" ]; then
-    err "URL is required."; pause; return 1
+    err "URL is required."; pause; return 0
   fi
   printf "\n"
-  "$SPOTIFLAC_CLI_BIN" metadata "$url"
+  "$SPOTIFLAC_CLI_BIN" metadata "$url" || err "Failed to fetch metadata."
   pause
 }
 
 action_stack_up() {
-  require_docker || return 1
+  require_docker || return 0
   ensure_env_file
   cd "$PROJECT_ROOT"
   info "Starting the stack…"
@@ -326,7 +381,7 @@ action_stack_up() {
 }
 
 action_stack_down() {
-  require_docker || return 1
+  require_docker || return 0
   cd "$PROJECT_ROOT"
   docker compose down
   ok "Stack stopped."
@@ -334,14 +389,14 @@ action_stack_down() {
 }
 
 action_stack_logs() {
-  require_docker || return 1
+  require_docker || return 0
   info "Press Ctrl+C to stop following logs."
   cd "$PROJECT_ROOT"
-  docker compose logs -f
+  docker compose logs -f || true
 }
 
 action_stack_status() {
-  require_docker || return 1
+  require_docker || return 0
   cd "$PROJECT_ROOT"
   printf "\n${BOLD}Container status${NC}\n"; hr
   docker compose ps
@@ -356,15 +411,41 @@ action_stack_status() {
   else
     warn "Syncthing not responding on :8384 (may be disabled)"
   fi
+  printf "\n${BOLD}Disk usage${NC}\n"; hr
+  printf "  Music library: %s\n" "$(music_size)"
   pause
 }
 
 action_stack_restart_navidrome() {
-  require_docker || return 1
+  require_docker || return 0
   cd "$PROJECT_ROOT"
   info "Restarting Navidrome…"
   docker compose restart navidrome
   ok "Navidrome restarted."
+  pause
+}
+
+action_backup_config() {
+  local ts backup_dir archive
+  ts="$(date +%Y%m%d_%H%M%S)"
+  backup_dir="$PROJECT_ROOT/backups"
+  archive="$backup_dir/privatetunes-config-$ts.tar.gz"
+  mkdir -p "$backup_dir"
+
+  local files_to_backup=()
+  [ -f "$PROJECT_ROOT/.env" ] && files_to_backup+=(".env")
+  [ -f "$PROJECT_ROOT/Caddyfile" ] && files_to_backup+=("Caddyfile")
+  [ -f "$PROJECT_ROOT/docker-compose.yml" ] && files_to_backup+=("docker-compose.yml")
+
+  if [ ${#files_to_backup[@]} -eq 0 ]; then
+    warn "No config files found to backup."
+    pause; return 0
+  fi
+
+  cd "$PROJECT_ROOT"
+  tar -czf "$archive" "${files_to_backup[@]}"
+  ok "Config backed up → $archive"
+  info "Files included: ${files_to_backup[*]}"
   pause
 }
 
@@ -375,16 +456,16 @@ action_print_paths() {
   printf "  Data folder    : %s\n" "$PROJECT_ROOT/data"
   printf "  spotiflac-cli  : %s\n" "$SPOTIFLAC_CLI_BIN"
   printf "  .env file      : %s\n" "$PROJECT_ROOT/.env"
+  printf "  links.txt      : %s\n" "$LINKS_FILE"
+  printf "  Music size     : %s\n" "$(music_size)"
   if [ -f "$PROJECT_ROOT/.env" ]; then
     printf "\n${BOLD}.env contents${NC}\n"; hr
-    # mask no secrets but show file clearly
     sed 's/^/  /' "$PROJECT_ROOT/.env"
   fi
   pause
 }
 
 # ── first-run onboarding check ────────────────────────────────────────────────
-# If .env doesn't exist OR the domain is still the placeholder, prompt the user.
 maybe_first_run_onboard() {
   local domain
   domain="$(grep '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2 || echo '')"
@@ -392,11 +473,16 @@ maybe_first_run_onboard() {
     clear || true
     printf "${CYAN}"
     printf '╔══════════════════════════════════════════════════════════╗\n'
-    printf '║   👋  Welcome to Cloud Music Stack!                     ║\n'
-    printf '║      by @Paidguy  —  github.com/Paidguy/music           ║\n'
+    printf '║                                                          ║\n'
+    printf '║   🎵  Welcome to PrivateTunes!                          ║\n'
+    printf '║                                                          ║\n'
+    printf '║      Your private, self-hosted music server.             ║\n'
+    printf '║      Created by @Paidguy                                 ║\n'
+    printf '║      github.com/Paidguy/PrivateTunes                     ║\n'
+    printf '║                                                          ║\n'
     printf '╚══════════════════════════════════════════════════════════╝\n'
     printf "${NC}\n"
-    info "It looks like this is your first time running the stack,"
+    info "It looks like this is your first time running PrivateTunes,"
     info "or your domain hasn't been configured yet."
     printf "\n"
     if confirm "Run the quick onboarding wizard now?"; then
@@ -410,44 +496,48 @@ maybe_first_run_onboard() {
 
 # ── main menu ─────────────────────────────────────────────────────────────────
 draw_menu() {
-  # Collect live status (fast, timeout 2s each)
   local d_stat=1 n_stat=1 s_stat=1
   docker_ok    && d_stat=0
   navidrome_ok && n_stat=0
   syncthing_ok && s_stat=0
 
-  local domain
+  local domain lib_size
   domain="$(grep '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null | cut -d= -f2 || echo 'not configured')"
+  lib_size="$(music_size)"
 
   clear || true
   printf "${CYAN}"
   printf '╔══════════════════════════════════════════════════════════╗\n'
-  printf '║   🎵  Cloud Music Stack          by @Paidguy             ║\n'
-  printf '║      github.com/Paidguy/music                           ║\n'
-  printf '╠══════════════════════════════════╦══════════════════════╣\n'
-  printf '║                                  ║  STATUS              ║\n'
-  printf "║  ${BOLD}${YELLOW}[s]${NC}${CYAN} Full Setup / Onboarding   ${CYAN}║  "; status_badge "Docker"    $d_stat; printf "  ${CYAN}║\n"
-  printf "║  ${BOLD}${YELLOW}[h]${NC}${CYAN} Help                      ${CYAN}║  "; status_badge "Navidrome" $n_stat; printf "  ${CYAN}║\n"
-  printf "║                                  ║  "; status_badge "Syncthing" $s_stat; printf "  ${CYAN}║\n"
-  printf '╠══════════════════════════════════╩══════════════════════╣\n'
-  printf "║  ${BOLD}MUSIC TOOLS${NC}${CYAN}                                         ║\n"
-  printf "║  ${BOLD}${YELLOW}[1]${NC}${CYAN} Install / Update spotiflac-cli                  ║\n"
-  printf "║  ${BOLD}${YELLOW}[2]${NC}${CYAN} Download music from Spotify URL                 ║\n"
-  printf "║  ${BOLD}${YELLOW}[3]${NC}${CYAN} View track metadata                             ║\n"
+  printf '║                                                          ║\n'
+  printf '║   🎵  PrivateTunes                        by @Paidguy   ║\n'
+  printf '║       github.com/Paidguy/PrivateTunes      v%-6s      ║\n' "$VERSION"
+  printf '║                                                          ║\n'
+  printf '╠══════════════════════════════════╦═══════════════════════╣\n'
+  printf '║                                  ║  STATUS               ║\n'
+  printf "║  ${BOLD}${YELLOW}[s]${NC}${CYAN} Full Setup / Onboarding   ${CYAN}║  "; status_badge "Docker"    $d_stat; printf "   ${CYAN}║\n"
+  printf "║  ${BOLD}${YELLOW}[h]${NC}${CYAN} Help                      ${CYAN}║  "; status_badge "Navidrome" $n_stat; printf "   ${CYAN}║\n"
+  printf "║                                  ║  "; status_badge "Syncthing" $s_stat; printf "   ${CYAN}║\n"
+  printf '╠══════════════════════════════════╩═══════════════════════╣\n'
+  printf "║  ${BOLD}MUSIC TOOLS${NC}${CYAN}                                          ║\n"
+  printf "║  ${BOLD}${YELLOW}[1]${NC}${CYAN} Install / Update spotiflac-cli                   ║\n"
+  printf "║  ${BOLD}${YELLOW}[2]${NC}${CYAN} Download music from Spotify URL                  ║\n"
+  printf "║  ${BOLD}${YELLOW}[3]${NC}${CYAN} View track metadata                              ║\n"
+  printf "║  ${BOLD}${YELLOW}[b]${NC}${CYAN} Batch download from links.txt                    ║\n"
   printf '╠══════════════════════════════════════════════════════════╣\n'
-  printf "║  ${BOLD}DOCKER STACK${NC}${CYAN}                                        ║\n"
-  printf "║  ${BOLD}${YELLOW}[4]${NC}${CYAN} Start stack     ${BOLD}${YELLOW}[5]${NC}${CYAN} Stop stack                  ║\n"
-  printf "║  ${BOLD}${YELLOW}[6]${NC}${CYAN} View logs       ${BOLD}${YELLOW}[7]${NC}${CYAN} Stack status                ║\n"
-  printf "║  ${BOLD}${YELLOW}[8]${NC}${CYAN} Restart Navidrome                               ║\n"
+  printf "║  ${BOLD}DOCKER STACK${NC}${CYAN}                                         ║\n"
+  printf "║  ${BOLD}${YELLOW}[4]${NC}${CYAN} Start stack     ${BOLD}${YELLOW}[5]${NC}${CYAN} Stop stack                   ║\n"
+  printf "║  ${BOLD}${YELLOW}[6]${NC}${CYAN} View logs       ${BOLD}${YELLOW}[7]${NC}${CYAN} Stack status                 ║\n"
+  printf "║  ${BOLD}${YELLOW}[8]${NC}${CYAN} Restart Navidrome                                ║\n"
   printf '╠══════════════════════════════════════════════════════════╣\n'
-  printf "║  ${BOLD}CONFIGURATION${NC}${CYAN}                                       ║\n"
-  printf "║  ${BOLD}${YELLOW}[9]${NC}${CYAN} Domain setup wizard                             ║\n"
-  printf "║  ${BOLD}${YELLOW}[p]${NC}${CYAN} Show paths / .env                               ║\n"
-  local domain_display
-  domain_display="$(printf '%.49s' "Domain: $domain")"
-  printf "║  %-57s║\n" "$domain_display"
+  printf "║  ${BOLD}CONFIGURATION${NC}${CYAN}                                        ║\n"
+  printf "║  ${BOLD}${YELLOW}[9]${NC}${CYAN} Domain setup wizard                              ║\n"
+  printf "║  ${BOLD}${YELLOW}[c]${NC}${CYAN} Backup config       ${BOLD}${YELLOW}[p]${NC}${CYAN} Show paths / .env        ║\n"
+  local domain_display lib_display
+  domain_display="$(printf '%.46s' "Domain: $domain")"
+  lib_display="Library: $lib_size"
+  printf "║  %-29s  %-27s║\n" "$domain_display" "$lib_display"
   printf '╠══════════════════════════════════════════════════════════╣\n'
-  printf "║  ${BOLD}${YELLOW}[0]${NC}${CYAN} Exit                                            ║\n"
+  printf "║  ${BOLD}${YELLOW}[0]${NC}${CYAN} Exit                                             ║\n"
   printf '╚══════════════════════════════════════════════════════════╝\n'
   printf "${NC}"
 }
@@ -466,15 +556,17 @@ main_menu() {
       1)   action_install_or_update ;;
       2)   action_download ;;
       3)   action_metadata ;;
+      b|B) action_batch_download ;;
       4)   action_stack_up ;;
       5)   action_stack_down ;;
       6)   action_stack_logs ;;
       7)   action_stack_status ;;
       8)   action_stack_restart_navidrome ;;
       9)   onboard_domain ;;
+      c|C) action_backup_config ;;
       p|P) action_print_paths ;;
       0)
-        printf "\n  ${DIM}Goodbye! — @Paidguy${NC}\n\n"
+        printf "\n  ${DIM}Goodbye! — PrivateTunes by @Paidguy${NC}\n\n"
         exit 0
         ;;
       *)

@@ -4,22 +4,20 @@ services:
     ports:
       - "4533:4533"
     environment:
-      # Existing settings...
       ND_SCANSCHEDULE: "@every 1h"
       ND_LOGLEVEL: info
-      
-      # --- NEW PERFORMANCE SETTINGS ---
+
       # Cache images in memory so scrolling is instant
       ND_IMAGECACHESIZE: "100MB"
-      
+
       # Keep transcoded songs for a long time (prevents re-doing work)
       ND_TRANSCODINGCACHESIZE: "2GB"
-      
+
       # Use all CPU cores for transcoding (faster startup)
       ND_TRANSCODINGPARALLELISM: 0
     volumes:
       - "./data/navidrome:/data"
-      - "./music:/music"
+      - "./music:/music:ro"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4533/ping"]
@@ -30,7 +28,7 @@ services:
 
   syncthing:
     image: syncthing/syncthing
-    hostname: aws-music-server
+    hostname: privatetunes-server
     environment:
       - PUID=${UID:-1000}
       - PGID=${GID:-1000}
@@ -52,7 +50,8 @@ services:
   caddy:
     image: caddy:latest
     depends_on:
-      - navidrome
+      navidrome:
+        condition: service_healthy
     environment:
       - DOMAIN=${DOMAIN:-your-domain.duckdns.org}
     ports:
@@ -64,13 +63,12 @@ services:
       - caddy_config:/config
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:2019/config/"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
-# This section below is what was missing
 volumes:
   caddy_data:
   caddy_config:

@@ -1,6 +1,6 @@
-# Contributing to Cloud Music Stack
+# Contributing to PrivateTunes
 
-Thank you for your interest in contributing to Cloud Music Stack! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to **PrivateTunes**! This document provides guidelines and instructions for contributing to the project.
 
 ## Table of Contents
 
@@ -57,8 +57,8 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 1. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR-USERNAME/music.git
-   cd music
+   git clone https://github.com/YOUR-USERNAME/PrivateTunes.git
+   cd PrivateTunes
    ```
 
 2. Copy the example environment file:
@@ -70,8 +70,8 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 4. Run the setup script:
    ```bash
-   cd scripts
-   ./setup.sh
+   chmod +x scripts/setup.sh scripts/privatetunes.sh
+   ./scripts/setup.sh
    ```
 
 5. Start services:
@@ -180,4 +180,6 @@ If you have questions about contributing, feel free to:
 - Check existing documentation in README.md
 - Review closed issues and PRs for similar questions
 
-Thank you for contributing to Cloud Music Stack! 🎵
+---
+
+**PrivateTunes** is created and maintained by **[@Paidguy](https://github.com/Paidguy)** 🎵

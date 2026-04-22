@@ -1,1 +1,4 @@
-# place your playlist and track links here for easy access
+# PrivateTunes — Batch Download Links
+# Add Spotify track, album, or playlist URLs below (one per line).
+# Lines starting with # are ignored.
+# Use menu option [b] in privatetunes.sh to download them all at once.

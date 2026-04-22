@@ -1,8 +1,10 @@
 <div align="center">
 
-## Cloud Music Stack (CMS)
+# 🎵 PrivateTunes
 
-Self-hosted music streaming with a **pure CLI download workflow** (no VM, no GUI desktop).
+**Your private, self-hosted music streaming server with a pure CLI download workflow.**
+
+No VM. No GUI desktop app. Just your music, your server, your rules.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
@@ -15,64 +17,76 @@ Self-hosted music streaming with a **pure CLI download workflow** (no VM, no GUI
 
 ---
 
-## What this repo is
+## What is PrivateTunes?
 
-CMS runs a personal music server (Navidrome) behind Caddy (automatic HTTPS), backed by a `./music` folder you control.  
-For acquisition, it integrates [`spotiflac-cli`](https://github.com/Superredstone/spotiflac-cli) and provides a simple interactive menu (`scripts/cms.sh`) to download music directly into your library.
+PrivateTunes runs a personal music server ([Navidrome](https://www.navidrome.org/)) behind [Caddy](https://caddyserver.com/) (automatic HTTPS), backed by a `./music` folder you control.
+
+For music acquisition, it integrates [`spotiflac-cli`](https://github.com/Superredstone/spotiflac-cli) and provides a beautiful interactive menu (`scripts/privatetunes.sh`) to download music directly into your library — including batch downloads from a link list.
 
 ## Architecture
 
-- **Caddy**: reverse proxy + automatic TLS
-- **Navidrome**: music server + Subsonic API
-- **Syncthing** (optional): sync your `./music` folder across devices
-- **spotiflac-cli**: CLI downloader (runs on the host, saves into `./music`)
+| Service | Role |
+|---|---|
+| **Caddy** | Reverse proxy + automatic TLS certificates |
+| **Navidrome** | Music server with Subsonic API + web player |
+| **Syncthing** *(optional)* | Sync your `./music` folder across devices |
+| **spotiflac-cli** | CLI downloader (runs on the host, saves into `./music`) |
 
 ## Prerequisites
 
 - **Linux server** (Ubuntu/Debian recommended)
 - **Docker** + Docker Compose plugin (`docker compose`)
 - **Ports**: `80` and `443` exposed (for HTTPS)
-- **A domain** pointing to the server (DuckDNS works well)
+- **A domain** pointing to the server (DuckDNS works well — it's free)
 
-## Quick start
+## Quick Start
 
 ```bash
-git clone https://github.com/Paidguy/music-stack.git
-cd music-stack
+git clone https://github.com/Paidguy/PrivateTunes.git
+cd PrivateTunes
 
 # Full automated setup:
-# - Installs Docker Engine + Docker Compose plugin (if missing)
-# - Installs system dependencies (curl, ca-certificates, git, gnupg)
-# - Creates required directories (music/, data/navidrome/, data/syncthing/)
-# - Downloads spotiflac-cli into ./bin/
-# - Copies .env.example → .env
-# - Starts the Docker stack
-# - Waits for Navidrome to be healthy
-chmod +x scripts/setup.sh scripts/cms.sh
+#   → Installs Docker Engine + Docker Compose plugin (if missing)
+#   → Installs system dependencies (curl, ca-certificates, git, gnupg)
+#   → Creates required directories (music/, data/navidrome/, data/syncthing/)
+#   → Downloads spotiflac-cli into ./bin/
+#   → Copies .env.example → .env and runs the domain wizard
+#   → Starts the Docker stack
+#   → Waits for Navidrome to be healthy
+chmod +x scripts/setup.sh scripts/privatetunes.sh
 sudo ./scripts/setup.sh
 
-# Download music / manage the stack interactively
-./scripts/cms.sh
+# Then use the interactive menu to download music & manage everything:
+./scripts/privatetunes.sh
 ```
 
-## Downloading music (CLI menu)
+## Downloading Music (CLI Menu)
 
 Run:
 
 ```bash
-./scripts/cms.sh
+./scripts/privatetunes.sh
 ```
 
-Menu actions include:
+### Menu Actions
 
-- **s) Full setup** — runs `setup.sh` end-to-end (Docker + deps + stack start)
-- **1) Install/Update spotiflac-cli**
-- **2) Download from Spotify URL** (saves into `./music`)
-- **3) View track metadata**
-- **4–6) Start / Stop / Logs** (`docker compose` wrappers)
-- **7) Stack status** — health check for Navidrome & Syncthing
-- **8) Restart Navidrome**
-- **9) Edit .env** — configure DOMAIN, UID, GID
+| Key | Action | Description |
+|-----|--------|-------------|
+| `s` | **Full Setup** | Runs `setup.sh` end-to-end (Docker + deps + stack start) |
+| `1` | **Install/Update spotiflac-cli** | Download the latest binary |
+| `2` | **Download from Spotify URL** | Paste a track/album/playlist URL → downloads as FLAC into `./music` |
+| `3` | **View track metadata** | Inspect metadata for any Spotify track URL |
+| `b` | **Batch download** | Download all URLs listed in `links.txt` in one go |
+| `4` | **Start stack** | `docker compose up -d` + waits for health checks |
+| `5` | **Stop stack** | `docker compose down` |
+| `6` | **View logs** | Follow live logs from all containers |
+| `7` | **Stack status** | Health checks for Navidrome & Syncthing + disk usage |
+| `8` | **Restart Navidrome** | Restart only the Navidrome container |
+| `9` | **Domain setup wizard** | Configure DOMAIN, UID, GID in `.env` |
+| `c` | **Backup config** | Archive `.env` + `Caddyfile` + `docker-compose.yml` |
+| `p` | **Show paths / .env** | Display all important paths and current config |
+| `h` | **Help** | Detailed help screen |
+| `0` | **Exit** | Quit the menu |
 
 ## Configuration
 
@@ -82,65 +96,81 @@ Create your `.env` file:
 cp .env.example .env
 ```
 
-Variables:
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DOMAIN` | Your domain name | `your-domain.duckdns.org` |
+| `UID` | User ID for Syncthing | `1000` |
+| `GID` | Group ID for Syncthing | `1000` |
 
-- **`DOMAIN`**: your domain name (e.g. `your-domain.duckdns.org`)
-- **`UID` / `GID`**: user/group ids for Syncthing (defaults to `1000`)
-
-## File structure
+## File Structure
 
 ```
-music-stack/
-├── Caddyfile
-├── docker-compose.yml
-├── .env.example
-├── music/                # your music library (Navidrome reads from here)
-├── data/                 # Navidrome + Syncthing state
-├── bin/                  # local tools (ignored by git)
+PrivateTunes/
+├── Caddyfile              # Caddy reverse proxy config
+├── Caddyfile.example      # Template Caddyfile
+├── docker-compose.yml     # Docker stack definition
+├── .env.example           # Environment template
+├── links.txt              # Batch download URLs (one per line)
+├── music/                 # Your music library (Navidrome reads from here)
+├── data/                  # Navidrome + Syncthing persistent state
+├── bin/                   # Local tools like spotiflac-cli (git-ignored)
 └── scripts/
-    ├── setup.sh          # host bootstrap (CLI edition)
-    └── cms.sh            # interactive CLI menu
+    ├── setup.sh           # Host bootstrap wizard
+    └── privatetunes.sh    # Interactive CLI menu
 ```
 
 ## Updating
 
 ```bash
-# Update containers
+# Update containers to latest versions
 docker compose pull
 docker compose up -d
 
 # Update spotiflac-cli (via menu)
-./scripts/cms.sh
+./scripts/privatetunes.sh
+# → Select option [1]
 ```
 
 ## Troubleshooting
 
 ### Music not appearing in Navidrome
 
-- Verify files are in `./music`
-- Restart Navidrome or trigger a scan in the UI
+- Verify files are in `./music/`
+- Restart Navidrome or trigger a scan in the UI:
 
 ```bash
 docker compose restart navidrome
 ```
 
-### Caddy/SSL issues
+### Caddy / SSL Issues
 
 ```bash
 docker compose logs -f caddy
 ```
 
 Make sure:
-
 - `DOMAIN` in `.env` is correct
 - Ports `80/443` are reachable publicly
 - Your DNS A/AAAA record points to the server
 
+### Container Issues
+
+```bash
+# View all logs
+docker compose logs -f
+
+# Check health status
+docker compose ps
+```
+
 ---
 
-## License & disclaimer
+## Credits
+
+**PrivateTunes** is created and maintained by **[@Paidguy](https://github.com/Paidguy)**.
+
+## License & Disclaimer
 
 This project is for **personal use with legally obtained content**. You are responsible for compliance with local laws and the terms of services you use.
 
 Licensed under the MIT License. See [`LICENSE`](LICENSE).
-

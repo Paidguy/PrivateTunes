@@ -1,3 +1,5 @@
+# PrivateTunes — .gitignore
+
 # Ignore Music & Data
 music/*
 data/*
@@ -20,3 +22,6 @@ squashfs-root/
 # Local tooling
 /bin/
 /tmp/
+
+# Config backups
+/backups/

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Cloud Music Stack — Interactive Setup
-# Created by @Paidguy  |  https://github.com/Paidguy/music
+# PrivateTunes — Interactive Setup
+# Created by @Paidguy  |  https://github.com/Paidguy/PrivateTunes
 
 set -euo pipefail
 
@@ -32,22 +32,15 @@ step() {
   hr
 }
 
-# ask Y/n — default YES.  Returns 0 for yes, 1 for no.
 confirm() {
-  local msg="${1:-Continue?}"
-  local ans
+  local msg="${1:-Continue?}" ans
   printf " ${YELLOW}?${NC}  ${BOLD}%s${NC} [Y/n] " "$msg"
   read -r ans
-  case "$ans" in
-    [nN]*) return 1 ;;
-    *)     return 0 ;;
-  esac
+  case "$ans" in [nN]*) return 1 ;; *) return 0 ;; esac
 }
 
-# ask for a value with an optional default
 prompt_val() {
-  local label="$1" default="${2:-}"
-  local val
+  local label="$1" default="${2:-}" val
   if [ -n "$default" ]; then
     printf " ${YELLOW}?${NC}  ${BOLD}%s${NC} [%s]: " "$label" "$default"
   else
@@ -64,9 +57,10 @@ banner() {
   printf "${CYAN}"
   printf '╔══════════════════════════════════════════════════════════╗\n'
   printf '║                                                          ║\n'
-  printf '║   🎵  Cloud Music Stack  —  Setup Wizard                ║\n'
+  printf '║   🎵  PrivateTunes  —  Setup Wizard                     ║\n'
   printf '║                                                          ║\n'
-  printf "║   Built by ${MAGENTA}${BOLD}@Paidguy${NC}${CYAN}  https://github.com/Paidguy/music       ║\n"
+  printf "║   Built by ${MAGENTA}${BOLD}@Paidguy${NC}${CYAN}                                     ║\n"
+  printf '║   https://github.com/Paidguy/PrivateTunes                ║\n'
   printf '║                                                          ║\n'
   printf '╚══════════════════════════════════════════════════════════╝\n'
   printf "${NC}\n"
@@ -88,18 +82,46 @@ detect_arch() {
 install_docker() {
   info "Installing Docker Engine + Compose plugin via official apt repo…"
 
+  # Detect distro
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    local distro_id="${ID:-unknown}"
+    local codename="${VERSION_CODENAME:-}"
+    if [ -z "$codename" ]; then
+      codename="$(lsb_release -cs 2>/dev/null || echo '')"
+    fi
+  else
+    local distro_id="unknown"
+    local codename=""
+  fi
+
+  case "$distro_id" in
+    ubuntu|debian)
+      info "Detected $distro_id ($codename)"
+      ;;
+    *)
+      warn "Detected '$distro_id' — Docker install script is designed for Ubuntu/Debian."
+      warn "You may need to install Docker manually: https://docs.docker.com/engine/install/"
+      if ! confirm "Try anyway?"; then
+        return 1
+      fi
+      ;;
+  esac
+
   sudo apt-get update -qq
   sudo apt-get install -y ca-certificates curl gnupg lsb-release
 
   sudo install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+
+  local repo_url="https://download.docker.com/linux/$distro_id"
+  curl -fsSL "$repo_url/gpg" \
     | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
   sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
   echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-    https://download.docker.com/linux/ubuntu \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    $repo_url \
+    $codename stable" \
     | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
   sudo apt-get update -qq
@@ -122,7 +144,7 @@ install_docker() {
 
 install_spotiflac_cli() {
   local arch asset url
-  arch="$(detect_arch)"
+  arch="$(detect_arch)" || return 1
   asset="spotiflac-cli-linux-$arch"
   url="https://github.com/Superredstone/spotiflac-cli/releases/download/v1.0.0/$asset"
 
@@ -168,14 +190,12 @@ onboard_domain() {
     ok "Domain set to: $new_domain"
   fi
 
-  # Write DOMAIN into .env
   if grep -q '^DOMAIN=' "$PROJECT_ROOT/.env" 2>/dev/null; then
     sed -i "s|^DOMAIN=.*|DOMAIN=$new_domain|" "$PROJECT_ROOT/.env"
   else
     echo "DOMAIN=$new_domain" >> "$PROJECT_ROOT/.env"
   fi
 
-  # Also ask for UID/GID for Syncthing
   printf "\n"
   info "Syncthing needs your system user/group IDs (usually 1000)."
   local uid_val gid_val
@@ -200,7 +220,7 @@ onboard_domain() {
 main() {
   banner
 
-  printf "${BOLD}Welcome to the Cloud Music Stack setup!${NC}\n"
+  printf "${BOLD}Welcome to the PrivateTunes setup!${NC}\n"
   printf "This wizard will walk you through each step.\n"
   printf "You can skip any step you've already completed.\n\n"
 
@@ -267,12 +287,12 @@ main() {
   else
     ok ".env already exists."
   fi
-  chmod +x "$PROJECT_ROOT/scripts/setup.sh" "$PROJECT_ROOT/scripts/cms.sh"
+  chmod +x "$PROJECT_ROOT/scripts/setup.sh" "$PROJECT_ROOT/scripts/privatetunes.sh"
 
   if confirm "Run the domain & UID/GID setup wizard?"; then
     onboard_domain
   else
-    info "Skipped. You can configure your domain later via: ./scripts/cms.sh → option 9"
+    info "Skipped. You can configure your domain later via: ./scripts/privatetunes.sh → option 9"
   fi
 
   # ── Step 6: start the stack ─────────────────────────────────────────────────
@@ -312,7 +332,7 @@ main() {
   printf "\n${CYAN}"
   printf '╔══════════════════════════════════════════════════════════╗\n'
   printf '║                                                          ║\n'
-  printf '║   ✅  Setup Complete!                                    ║\n'
+  printf '║   ✅  PrivateTunes Setup Complete!                       ║\n'
   printf '║                                                          ║\n'
   local domain_display
   domain_display="$(printf '%.54s' "Caddy HTTPS   →  https://$domain_val")"
@@ -320,7 +340,9 @@ main() {
   printf "║   %-57s║\n" "Syncthing UI  →  http://localhost:8384"
   printf "║   %-57s║\n" "$domain_display"
   printf '║                                                          ║\n'
-  printf '║   Next step: run  ./scripts/cms.sh  to download music   ║\n'
+  printf '║   Next: run ./scripts/privatetunes.sh to download music  ║\n'
+  printf '║                                                          ║\n'
+  printf "║   ${MAGENTA}${BOLD}by @Paidguy${NC}${CYAN}  •  github.com/Paidguy/PrivateTunes           ║\n"
   printf '║                                                          ║\n'
   printf '╚══════════════════════════════════════════════════════════╝\n'
   printf "${NC}\n"

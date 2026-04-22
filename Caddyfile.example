@@ -1,4 +1,5 @@
-# The Main Music Site
+# PrivateTunes — Caddy reverse proxy (example)
+# Copy this to Caddyfile and update the domain, or use .env
 your-domain.duckdns.org {
     encode zstd gzip
     reverse_proxy http://navidrome:4533
