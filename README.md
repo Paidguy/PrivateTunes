@@ -108,10 +108,17 @@ cp .env.example .env
 PrivateTunes tracks every download in a persistent JSON database (`data/download_history.json`). This means:
 
 - **No duplicate downloads** — If a track/album/playlist was already downloaded, it's automatically skipped
+- **Filesystem-aware** — Scans your `music/` directory for existing files, so songs downloaded *before* this update are recognized too
 - **Resume interrupted batches** — If a batch download is interrupted (rate limits, crash, network error), re-running it picks up exactly where you left off
 - **Exponential backoff retries** — Failed downloads are retried up to 3 times with increasing wait times (5s → 15s → 45s), with extended waits for rate limits
 - **Atomic progress tracking** — Each successful download is recorded immediately, so even a hard crash preserves all progress
 - **URL normalization** — The same track won't be re-downloaded even if the URL has different tracking parameters (`?si=...`)
+
+### Existing Music (Pre-Update)
+
+On first launch after the update, if the history database is empty but your `music/` directory already has files, PrivateTunes will offer to **scan and import** them into the history. This ensures that tracks downloaded before the tracking system was added are recognized and won't be re-downloaded.
+
+You can also run this scan manually at any time from the history menu (`d` → `3`).
 
 ### Managing History
 
@@ -119,6 +126,7 @@ Use menu option `d` to:
 - View download statistics and recent downloads
 - Clear failed entries (so they get retried on next batch)
 - Clear all history (to force re-downloading everything)
+- **Scan existing music** — Import pre-existing files into the history database
 
 The history file is stored at `data/download_history.json` and is git-ignored.
 

@@ -193,11 +193,169 @@ history_record() {
 }
 
 # Check if files already exist on disk for a URL (filesystem-level dedup)
+# Uses spotiflac-cli metadata to get track info, then searches music/ dir
 filesystem_check() {
   local url="$1"
-  # We can't perfectly predict filenames, but if the music dir has any content
-  # that was recorded in history, trust the history. This is a secondary check.
-  # For now, return 1 (not found) — the history DB is the primary source.
+  local url_type
+  # Extract track/album/playlist type from URL
+  url_type="$(printf '%s' "$url" | sed -n 's|.*open\.spotify\.com/\([^/]*\)/.*|\1|p')"
+
+  # Only do filesystem check for single tracks (albums/playlists have many files)
+  if [ "$url_type" != "track" ]; then
+    return 1
+  fi
+
+  # If spotiflac-cli is not available, skip
+  [ -x "$SPOTIFLAC_CLI_BIN" ] || return 1
+
+  # Fetch metadata to get track name and artist
+  local meta_output
+  meta_output=$("$SPOTIFLAC_CLI_BIN" metadata "$url" 2>/dev/null) || return 1
+
+  local track_name track_artist
+  track_name=$(printf '%s' "$meta_output" | grep -i '^Name:' | sed 's/^Name: *//' | head -1)
+  track_artist=$(printf '%s' "$meta_output" | grep -i '^Artist:' | sed 's/^Artist: *//' | head -1)
+
+  [ -z "$track_name" ] && return 1
+
+  # Search for matching .flac files in the music directory
+  # Default spotiflac-cli naming: "{title} {artist}.flac"
+  local expected_name="${track_name} ${track_artist}"
+
+  # Case-insensitive search for the expected filename pattern
+  if find "$DEFAULT_OUTPUT_DIR" -type f -iname "*.flac" 2>/dev/null | while IFS= read -r filepath; do
+    local basename
+    basename="$(basename "$filepath" .flac)"
+    # Exact match (case-insensitive)
+    if printf '%s' "$basename" | grep -qi "^${track_name}.*${track_artist}$" 2>/dev/null; then
+      return 0
+    fi
+    # Partial match: just check if both track name and artist appear in filename
+    if printf '%s' "$basename" | grep -qi "$track_name" 2>/dev/null && \
+       printf '%s' "$basename" | grep -qi "$track_artist" 2>/dev/null; then
+      return 0
+    fi
+  done; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Scan existing music files and pre-populate history database
+# This handles songs downloaded BEFORE the history system was added
+scan_existing_music() {
+  history_init
+  local scanned=0 added=0
+
+  if [ ! -d "$DEFAULT_OUTPUT_DIR" ]; then
+    warn "Music directory not found: $DEFAULT_OUTPUT_DIR"
+    return 1
+  fi
+
+  info "Scanning music directory for existing files…"
+
+  # Find all .flac files
+  while IFS= read -r filepath; do
+    scanned=$((scanned + 1))
+    local basename
+    basename="$(basename "$filepath" .flac)"
+
+    # Skip empty names
+    [ -z "$basename" ] && continue
+
+    # Create a synthetic ID from the filename for history tracking
+    # Format: "file/<sanitized_basename>"
+    local file_id
+    file_id="file/$(printf '%s' "$basename" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | sed 's/__*/_/g')"
+
+    # Check if this file is already in history
+    local already_tracked=false
+    if ensure_cmd jq; then
+      local found
+      found=$(jq -r --arg fid "$file_id" '.downloads[$fid].status // empty' "$HISTORY_FILE" 2>/dev/null)
+      [ -n "$found" ] && already_tracked=true
+    fi
+
+    if [ "$already_tracked" = false ]; then
+      # Record it as a completed filesystem-discovered download
+      local ts
+      ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)"
+
+      if ensure_cmd jq; then
+        local tmp_file="${HISTORY_FILE}.tmp.$$"
+        jq --arg fid "$file_id" \
+           --arg bn "$basename" \
+           --arg fp "$filepath" \
+           --arg ts "$ts" \
+           '.downloads[$fid] = {
+              "original_url": ("filesystem://" + $fp),
+              "normalized_url": ("filesystem://" + $bn),
+              "status": "completed",
+              "timestamp": $ts,
+              "source": "filesystem_scan"
+            }' "$HISTORY_FILE" > "$tmp_file" 2>/dev/null && \
+          mv -f "$tmp_file" "$HISTORY_FILE"
+      else
+        local log_file="${HISTORY_FILE%.json}.log"
+        printf '%s\t%s\t%s\t%s\n' "$ts" "completed" "$file_id" "filesystem://$basename" >> "$log_file"
+      fi
+      added=$((added + 1))
+    fi
+  done < <(find "$DEFAULT_OUTPUT_DIR" -type f \( -iname '*.flac' -o -iname '*.mp3' -o -iname '*.ogg' -o -iname '*.opus' -o -iname '*.m4a' -o -iname '*.wav' \) 2>/dev/null)
+
+  ok "Scan complete: $scanned file(s) found, $added new entries added to history."
+  return 0
+}
+
+# Check if we should auto-scan existing music on first run of history system
+maybe_auto_scan() {
+  history_init
+  local h_total
+  if ensure_cmd jq; then
+    h_total=$(jq '.downloads | length' "$HISTORY_FILE" 2>/dev/null || echo 0)
+  else
+    h_total=0
+  fi
+
+  # If history is empty but music files exist, offer to scan
+  if [ "$h_total" -eq 0 ]; then
+    local file_count
+    file_count=$(find "$DEFAULT_OUTPUT_DIR" -type f \( -iname '*.flac' -o -iname '*.mp3' -o -iname '*.ogg' -o -iname '*.opus' -o -iname '*.m4a' -o -iname '*.wav' \) 2>/dev/null | wc -l)
+    if [ "$file_count" -gt 0 ]; then
+      printf "\n"
+      info "Found $file_count existing music file(s) but download history is empty."
+      if confirm "Scan existing files into history? (prevents re-downloading)"; then
+        scan_existing_music
+        pause
+      fi
+    fi
+  fi
+}
+
+# Filesystem-based check for batch download: search for track name in music dir
+# This is a lightweight check that doesn't require API calls
+filesystem_check_by_name() {
+  local track_name="$1" track_artist="$2"
+  [ -z "$track_name" ] && return 1
+
+  # Search for matching files in the music directory
+  local found=false
+  while IFS= read -r filepath; do
+    local basename
+    basename="$(basename "$filepath")"
+    basename="${basename%.*}"  # Remove extension
+
+    # Check if both track name and artist appear in filename (case-insensitive)
+    if printf '%s' "$basename" | grep -qi "$track_name" 2>/dev/null; then
+      if [ -z "$track_artist" ] || printf '%s' "$basename" | grep -qi "$track_artist" 2>/dev/null; then
+        found=true
+        break
+      fi
+    fi
+  done < <(find "$DEFAULT_OUTPUT_DIR" -type f \( -iname '*.flac' -o -iname '*.mp3' -o -iname '*.ogg' \) 2>/dev/null)
+
+  [ "$found" = true ] && return 0
   return 1
 }
 
@@ -604,9 +762,20 @@ action_download() {
   if history_check "$url" || history_check_log "$url"; then
     local spotify_id
     spotify_id="$(extract_spotify_id "$url")"
-    warn "Already downloaded: $spotify_id"
+    warn "Already downloaded: $spotify_id (from history)"
     if ! confirm "Re-download anyway?"; then
       info "Skipped."; pause; return 0
+    fi
+    info "Force re-downloading…"
+  # Check filesystem as fallback (for pre-update downloads)
+  elif filesystem_check "$url"; then
+    local spotify_id
+    spotify_id="$(extract_spotify_id "$url")"
+    warn "Already exists on disk: $spotify_id"
+    if ! confirm "Re-download anyway?"; then
+      # Record it in history so future checks are faster
+      history_record "$url" "completed"
+      info "Skipped. Added to history."; pause; return 0
     fi
     info "Force re-downloading…"
   fi
@@ -657,12 +826,20 @@ action_batch_download() {
 
   while IFS= read -r line; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
-    # Check if already downloaded
+    # Check if already downloaded (history DB)
     if history_check "$line" || history_check_log "$line"; then
       skipped=$((skipped + 1))
       local sid
       sid="$(extract_spotify_id "$line")"
       printf "  ${DIM}⊘ Already done: %s${NC}\n" "$sid"
+    # Check filesystem as fallback (for pre-update downloads)
+    elif filesystem_check "$line"; then
+      skipped=$((skipped + 1))
+      local sid
+      sid="$(extract_spotify_id "$line")"
+      printf "  ${DIM}⊘ Found on disk: %s${NC}\n" "$sid"
+      # Record it in history so future checks are faster
+      history_record "$line" "completed"
     else
       pending_urls+=("$line")
       pending=$((pending + 1))
@@ -775,7 +952,8 @@ action_download_history() {
   printf "  ${BOLD}Actions${NC}\n"
   printf "    ${YELLOW}1${NC}  Clear failed entries (allow retry)\n"
   printf "    ${YELLOW}2${NC}  Clear ALL history\n"
-  printf "    ${YELLOW}3${NC}  Back to menu\n\n"
+  printf "    ${YELLOW}3${NC}  Scan existing music files into history\n"
+  printf "    ${YELLOW}4${NC}  Back to menu\n\n"
 
   local hchoice
   printf "  ${BOLD}Select:${NC} "
@@ -806,6 +984,10 @@ action_download_history() {
       else
         info "Cancelled."
       fi
+      pause
+      ;;
+    3)
+      scan_existing_music
       pause
       ;;
     *)
@@ -1042,6 +1224,7 @@ draw_menu() {
 
 main_menu() {
   maybe_first_run_onboard
+  maybe_auto_scan
 
   while true; do
     draw_menu
