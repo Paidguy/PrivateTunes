@@ -14,9 +14,10 @@ DOWNLOAD_TIMEOUT="${DOWNLOAD_TIMEOUT:-300}"
 
 # ── Download with Retry + API Rotation ────────────────────────────────────────
 download_with_retry() {
-  local url="$1" output_dir="$2"
+  local url="$1" output_dir="$2" is_batch="${3:-0}"
   local attempt=0 wait_time=$BASE_BACKOFF
-  local exit_code last_output
+  local exit_code last_output tmp_log
+  tmp_log="$(mktemp)"
 
   while [ $attempt -lt $MAX_RETRIES ]; do
     attempt=$((attempt + 1))
@@ -28,12 +29,20 @@ download_with_retry() {
       wait_time=$((wait_time * 3))
     fi
 
-    # Capture output for error analysis
-    last_output="$(timeout "$DOWNLOAD_TIMEOUT" \
-      "$SPOTIFLAC_CLI_BIN" download "$url" --output "$output_dir" 2>&1)"
-    exit_code=$?
+    # Capture output for error analysis (and stream it if not in batch mode)
+    if [ "$is_batch" = "0" ]; then
+      printf "\n"
+      "$SPOTIFLAC_CLI_BIN" download "$url" --output "$output_dir" 2>&1 | tee "$tmp_log"
+      exit_code=${PIPESTATUS[0]}
+    else
+      "$SPOTIFLAC_CLI_BIN" download "$url" --output "$output_dir" > "$tmp_log" 2>&1
+      exit_code=$?
+    fi
+
+    last_output="$(cat "$tmp_log")"
 
     if [ $exit_code -eq 0 ]; then
+      rm -f "$tmp_log"
       return 0
     fi
 
@@ -62,6 +71,7 @@ download_with_retry() {
     printf "${NC}\n"
   fi
 
+  rm -f "$tmp_log"
   return 1
 }
 
@@ -136,7 +146,7 @@ action_download() {
   fi
 
   info "Downloading to: $DEFAULT_OUTPUT_DIR"
-  if download_with_retry "$url" "$DEFAULT_OUTPUT_DIR"; then
+  if download_with_retry "$url" "$DEFAULT_OUTPUT_DIR" "0"; then
     history_record "$url" "completed"
     ok "Download complete"
     if navidrome_ok; then
@@ -217,7 +227,7 @@ action_batch_download() {
     sid="$(extract_spotify_id "$url")"
     batch_header "$count" "$pending" "$sid" "$url"
 
-    if download_with_retry "$url" "$DEFAULT_OUTPUT_DIR"; then
+    if download_with_retry "$url" "$DEFAULT_OUTPUT_DIR" "1"; then
       history_record "$url" "completed"
       succeeded=$((succeeded + 1))
       track_status "$count" "$pending" "$sid" "success"
