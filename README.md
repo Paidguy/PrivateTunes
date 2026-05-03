@@ -22,7 +22,7 @@ No VM. No GUI desktop app. Just your music, your server, your rules.
 
 PrivateTunes runs a personal music server ([Navidrome](https://www.navidrome.org/)) behind [Caddy](https://caddyserver.com/) (automatic HTTPS), backed by a `./music` folder you control.
 
-For music acquisition, it integrates [`spotiflac-cli`](https://github.com/Superredstone/spotiflac-cli) and provides a **premium interactive CLI** (`scripts/privatetunes.sh`) to download music directly into your library — including batch downloads with progress tracking, smart retries, and download history.
+For music acquisition, it integrates a powerful backend via [`SpotiFLAC-CLI`](https://github.com/lahiruchinthana/SpotiFLAC-CLI) and provides a **premium interactive CLI** (`scripts/privatetunes.sh`) to download music directly into your library — including batch downloads with progress tracking, smart retries, a download queue, and download history.
 
 ### ✨ v3.0.0 Highlights
 
@@ -30,7 +30,7 @@ For music acquisition, it integrates [`spotiflac-cli`](https://github.com/Superr
 - **Modular architecture** — 10 focused modules instead of one monolith
 - **Auto-update system** — Git-based with semver comparison and safe rollback
 - **Permission auto-fix** — Never manually `chmod` again
-- **Smart downloads** — Error analysis, exponential backoff, API fallback chains
+- **Smart downloads** — Automated API rotation across Tidal/Qobuz/Amazon, error analysis, queue management, and retry workflows
 - **Debug mode** — `--debug` flag for verbose troubleshooting
 
 ## Architecture
@@ -40,7 +40,7 @@ For music acquisition, it integrates [`spotiflac-cli`](https://github.com/Superr
 | **Caddy** | Reverse proxy + automatic TLS certificates |
 | **Navidrome** | Music server with Subsonic API + web player |
 | **Syncthing** *(optional)* | Sync your `./music` folder across devices |
-| **spotiflac-cli** | CLI downloader (runs on the host, saves into `./music`) |
+| **SpotiFLAC-CLI** | CLI downloader (runs on the host, saves into `./music`) |
 
 ## Prerequisites
 
@@ -59,7 +59,7 @@ cd PrivateTunes
 #   → Installs Docker Engine + Docker Compose plugin (if missing)
 #   → Installs system dependencies (curl, ca-certificates, git, gnupg)
 #   → Creates required directories (music/, data/navidrome/, data/syncthing/)
-#   → Downloads spotiflac-cli into ./bin/
+#   → Downloads SpotiFLAC-CLI into ./bin/
 #   → Copies .env.example → .env and runs the domain wizard
 #   → Starts the Docker stack
 #   → Waits for Navidrome to be healthy
@@ -87,11 +87,12 @@ Run:
 | `s` | **Setup wizard** | Guided 5-step onboarding (domain, tools, Docker, admin) |
 | `u` | **Check for updates** | Git-based auto-update with version comparison |
 | `h` | **Help & docs** | Comprehensive help screen |
-| `1` | **Install/Update spotiflac-cli** | Download the latest binary |
-| `2` | **Download from URL** | Paste a track/album/playlist URL → FLAC into `./music` |
-| `3` | **Track metadata** | Inspect metadata for any Spotify track URL |
-| `b` | **Batch download** | Download all URLs from `links.txt` with progress tracking |
-| `d` | **Download history** | View, clear, retry tracked downloads |
+| `1` | **Install/Update SpotiFLAC** | Download the latest binary |
+| `2` | **Download from URL (Now)** | Paste a track/album/playlist URL → FLAC into `./music` |
+| `3` | **Queue URL** | Add URL to `links.txt` for batch processing later |
+| `m` | **Track metadata** | Inspect metadata for any Spotify track URL |
+| `b` | **Batch process queue** | Download all URLs from `links.txt` with progress tracking |
+| `d` | **Download history** | View, clear, or queue failed tracks for retry |
 | `4` | **Start stack** | `docker compose up -d` with health monitoring |
 | `5` | **Stop stack** | `docker compose down` |
 | `6` | **View logs** | Follow live container logs |

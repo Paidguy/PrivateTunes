@@ -95,11 +95,9 @@ filesystem_check() {
   [ "$url_type" != "track" ] && return 1
   [ -x "$SPOTIFLAC_CLI_BIN" ] || return 1
 
-  local meta_output
-  meta_output=$("$SPOTIFLAC_CLI_BIN" metadata "$url" 2>/dev/null) || return 1
   local track_name track_artist
-  track_name=$(printf '%s' "$meta_output" | grep -i '^Name:' | sed 's/^Name: *//' | head -1)
-  track_artist=$(printf '%s' "$meta_output" | grep -i '^Artist:' | sed 's/^Artist: *//' | head -1)
+  track_name=$("$SPOTIFLAC_CLI_BIN" "$url" --print title 2>/dev/null)
+  track_artist=$("$SPOTIFLAC_CLI_BIN" "$url" --print artist 2>/dev/null)
   [ -z "$track_name" ] && return 1
 
   find "$DEFAULT_OUTPUT_DIR" -type f -iname "*.flac" 2>/dev/null | while IFS= read -r filepath; do
@@ -255,7 +253,7 @@ action_download_history() {
   printf "\n  ${DIM}History file: %s${NC}\n" "$HISTORY_FILE"
 
   section_header "ACTIONS"
-  menu_item "1" "Clear failed entries" "allow retry"
+  menu_item "1" "Queue failed items for retry" "adds to links.txt"
   menu_item "2" "Clear ALL history"
   menu_item "3" "Scan existing music files" "into history"
   menu_item "4" "Back to menu"
@@ -265,10 +263,19 @@ action_download_history() {
   case "$hchoice" in
     1)
       if ensure_cmd jq; then
-        local tmp_file="${HISTORY_FILE}.tmp.$$"
-        jq 'del(.downloads[] | select(.status == "failed"))' "$HISTORY_FILE" > "$tmp_file" 2>/dev/null && \
-          mv -f "$tmp_file" "$HISTORY_FILE"
-        ok "Failed entries cleared. They will be retried on next batch."
+        local failed_count
+        failed_count=$(jq '[.downloads[] | select(.status == "failed")] | length' "$HISTORY_FILE" 2>/dev/null || echo 0)
+        if [ "$failed_count" -gt 0 ]; then
+          jq -r '.downloads[] | select(.status == "failed") | .original_url' "$HISTORY_FILE" 2>/dev/null >> "$LINKS_FILE"
+          
+          local tmp_file="${HISTORY_FILE}.tmp.$$"
+          jq 'del(.downloads[] | select(.status == "failed"))' "$HISTORY_FILE" > "$tmp_file" 2>/dev/null && \
+            mv -f "$tmp_file" "$HISTORY_FILE"
+          ok "$failed_count failed item(s) added to queue (links.txt) and cleared from history."
+          info "Run 'Batch process queue' from the main menu to retry them."
+        else
+          info "No failed items found in history."
+        fi
       fi
       pause ;;
     2)

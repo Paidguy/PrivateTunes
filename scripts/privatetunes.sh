@@ -134,9 +134,9 @@ draw_menu() {
   menu_item "u" "Check for updates" "pull latest from GitHub"
 
   section_header "MUSIC"
-  menu_item_pair "1" "Install / update spotiflac" "2" "Download from URL"
-  menu_item_pair "3" "View track metadata" "b" "Batch download (links.txt)"
-  menu_item "d" "Download history" "view / clear / retry"
+  menu_item_pair "1" "Install / update SpotiFLAC" "2" "Download from URL (Now)"
+  menu_item_pair "3" "Queue URL to links.txt" "b" "Batch process queue"
+  menu_item_pair "d" "Download history" "m" "View track metadata"
 
   section_header "DOCKER"
   menu_item_pair "4" "Start stack" "5" "Stop stack"
@@ -169,8 +169,9 @@ main_menu() {
       u|U) action_check_update ;;
       1)   action_install_or_update ;;
       2)   action_download ;;
-      3)   action_metadata ;;
+      3)   action_queue_url ;;
       b|B) action_batch_download ;;
+      m|M) action_metadata ;;
       d|D) action_download_history ;;
       4)   action_stack_up ;;
       5)   action_stack_down ;;

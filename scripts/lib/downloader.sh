@@ -32,10 +32,10 @@ download_with_retry() {
     # Capture output for error analysis (and stream it if not in batch mode)
     if [ "$is_batch" = "0" ]; then
       printf "\n"
-      "$SPOTIFLAC_CLI_BIN" download "$url" --output "$output_dir" 2>&1 | tee "$tmp_log"
+      "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" --auto --auto-quality 24 --max-quality-cover 2>&1 | tee "$tmp_log"
       exit_code=${PIPESTATUS[0]}
     else
-      "$SPOTIFLAC_CLI_BIN" download "$url" --output "$output_dir" > "$tmp_log" 2>&1
+      "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" --auto --auto-quality 24 --max-quality-cover > "$tmp_log" 2>&1
       exit_code=$?
     fi
 
@@ -84,27 +84,43 @@ skip_track() {
 
 # ── Install / Require spotiflac-cli ──────────────────────────────────────────
 install_spotiflac_cli() {
-  local arch asset url
+  local arch asset url tmp_dir
   arch="$(detect_arch)" || return 1
-  asset="spotiflac-cli-linux-$arch"
-  url="https://github.com/Superredstone/spotiflac-cli/releases/download/v1.0.0/$asset"
+  asset="spotiflac-linux-$arch.tar.gz"
+  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/v1.1.4/$asset"
 
-  spin_start "Downloading spotiflac-cli ($asset)…"
+  spin_start "Downloading SpotiFLAC-CLI (v1.1.4 $arch)…"
   mkdir -p "$BIN_DIR"
+  tmp_dir="$(mktemp -d)"
 
   if ensure_cmd curl; then
-    curl -fsSL "$url" -o "$SPOTIFLAC_CLI_BIN" 2>/dev/null
+    curl -fsSL "$url" -o "$tmp_dir/$asset" 2>/dev/null
   elif ensure_cmd wget; then
-    wget -q -O "$SPOTIFLAC_CLI_BIN" "$url" 2>/dev/null
+    wget -q -O "$tmp_dir/$asset" "$url" 2>/dev/null
   else
     spin_stop fail "Neither curl nor wget found"
     return 1
   fi
 
-  if [ $? -eq 0 ] && [ -f "$SPOTIFLAC_CLI_BIN" ]; then
-    chmod +x "$SPOTIFLAC_CLI_BIN"
-    spin_stop ok "spotiflac-cli installed → $SPOTIFLAC_CLI_BIN"
+  if [ $? -eq 0 ] && [ -f "$tmp_dir/$asset" ]; then
+    tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
+    local bin_file
+    bin_file=$(find "$tmp_dir" -type f -executable | head -n 1)
+    if [ -z "$bin_file" ]; then
+      bin_file=$(find "$tmp_dir" -type f -name "*spotiflac*" | head -n 1)
+    fi
+    if [ -n "$bin_file" ]; then
+      mv -f "$bin_file" "$SPOTIFLAC_CLI_BIN"
+      chmod +x "$SPOTIFLAC_CLI_BIN"
+      rm -rf "$tmp_dir"
+      spin_stop ok "SpotiFLAC-CLI installed → $SPOTIFLAC_CLI_BIN"
+    else
+      rm -rf "$tmp_dir"
+      spin_stop fail "Could not locate binary in archive"
+      return 1
+    fi
   else
+    rm -rf "$tmp_dir"
     spin_stop fail "Download failed"
     return 1
   fi
@@ -161,6 +177,23 @@ action_download() {
   fi
   pause
 }
+
+# ── Queue Add Action ─────────────────────────────────────────────────────────
+action_queue_url() {
+  local url
+  url="$(prompt "Spotify URL to queue:")"
+  [ -z "$url" ] && { err "URL is required."; pause; return 0; }
+  
+  # Check if it already exists in links.txt
+  if grep -qF "$url" "$LINKS_FILE" 2>/dev/null; then
+    warn "URL is already in queue (links.txt)"
+  else
+    echo "$url" >> "$LINKS_FILE"
+    ok "Added to queue."
+  fi
+  pause
+}
+
 
 # ── Batch Download Action ────────────────────────────────────────────────────
 action_batch_download() {
@@ -268,13 +301,16 @@ action_install_or_update() {
   pause
 }
 
-# ── Metadata Action ──────────────────────────────────────────────────────────
 action_metadata() {
   require_spotiflac_cli || return 0
   local url
   url="$(prompt "Spotify track URL:")"
   [ -z "$url" ] && { err "URL is required."; pause; return 0; }
   printf "\n"
-  "$SPOTIFLAC_CLI_BIN" metadata "$url" || err "Failed to fetch metadata."
+  if ensure_cmd jq; then
+    "$SPOTIFLAC_CLI_BIN" "$url" --dump-json | jq . || err "Failed to fetch metadata."
+  else
+    "$SPOTIFLAC_CLI_BIN" "$url" --dump-json || err "Failed to fetch metadata."
+  fi
   pause
 }
