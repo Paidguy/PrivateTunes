@@ -68,9 +68,8 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 3. Update `.env` with your development domain (can use localhost or a test domain)
 
-4. Run the setup script:
+4. Run the setup script (permissions are auto-fixed):
    ```bash
-   chmod +x scripts/setup.sh scripts/privatetunes.sh
    ./scripts/setup.sh
    ```
 
@@ -106,11 +105,31 @@ Navidrome to fail parsing the schedule configuration.
 
 ## Style Guidelines
 
-### Shell Scripts
+### Shell Scripts (Modular Architecture)
+
+PrivateTunes uses a modular architecture with the main entry point at `scripts/privatetunes.sh` and individual modules in `scripts/lib/`:
+
+| Module | Responsibility |
+|--------|----------------|
+| `lib/ui.sh` | Colors, box-drawing, spinners, progress bars |
+| `lib/permissions.sh` | Auto-fix file permissions |
+| `lib/updater.sh` | Git-based auto-update system |
+| `lib/api_resolver.sh` | API health tracking & rotation |
+| `lib/downloader.sh` | Download engine with retry logic |
+| `lib/history.sh` | Persistent download history |
+| `lib/docker.sh` | Docker stack management |
+| `lib/config.sh` | .env management & backup |
+| `lib/onboarding.sh` | Setup wizard & help |
+
+When contributing:
 
 - Use `#!/bin/bash` shebang
-- Add comments for complex sections
-- Use meaningful variable names
+- Add a **double-source guard** at the top of new modules:
+  ```bash
+  [ -n "${_PT_MYMODULE_LOADED:-}" ] && return 0
+  _PT_MYMODULE_LOADED=1
+  ```
+- Use `debug_msg` for verbose output (only shown with `--debug`)
 - Follow existing code style in the repository
 - Run shellcheck before submitting
 
@@ -146,9 +165,11 @@ Before submitting your PR, ensure:
    docker compose config --quiet
    ```
 
-2. **Shell scripts pass shellcheck:**
+2. **Shell scripts pass syntax check:**
    ```bash
-   shellcheck scripts/*.sh
+   bash -n scripts/privatetunes.sh
+   bash -n scripts/lib/*.sh
+   shellcheck scripts/*.sh scripts/lib/*.sh
    ```
 
 3. **Services start successfully:**

@@ -2,13 +2,14 @@
 
 # 🎵 PrivateTunes
 
-**Your private, self-hosted music streaming server with a pure CLI download workflow.**
+**Your private, self-hosted music streaming server with a premium CLI workflow.**
 
 No VM. No GUI desktop app. Just your music, your server, your rules.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Navidrome](https://img.shields.io/badge/Powered%20by-Navidrome-00C9FF)](https://www.navidrome.org/)
+[![Version](https://img.shields.io/badge/version-3.0.0-brightgreen)]()
 [![Author](https://img.shields.io/badge/by-%40Paidguy-blueviolet)](https://github.com/Paidguy)
 
 **Created and maintained by [@Paidguy](https://github.com/Paidguy)**
@@ -21,7 +22,16 @@ No VM. No GUI desktop app. Just your music, your server, your rules.
 
 PrivateTunes runs a personal music server ([Navidrome](https://www.navidrome.org/)) behind [Caddy](https://caddyserver.com/) (automatic HTTPS), backed by a `./music` folder you control.
 
-For music acquisition, it integrates [`spotiflac-cli`](https://github.com/Superredstone/spotiflac-cli) and provides a beautiful interactive menu (`scripts/privatetunes.sh`) to download music directly into your library — including batch downloads from a link list.
+For music acquisition, it integrates [`spotiflac-cli`](https://github.com/Superredstone/spotiflac-cli) and provides a **premium interactive CLI** (`scripts/privatetunes.sh`) to download music directly into your library — including batch downloads with progress tracking, smart retries, and download history.
+
+### ✨ v3.0.0 Highlights
+
+- **Premium CLI UI** — 256-color palette, animated spinners, progress bars, status badges
+- **Modular architecture** — 10 focused modules instead of one monolith
+- **Auto-update system** — Git-based with semver comparison and safe rollback
+- **Permission auto-fix** — Never manually `chmod` again
+- **Smart downloads** — Error analysis, exponential backoff, API fallback chains
+- **Debug mode** — `--debug` flag for verbose troubleshooting
 
 ## Architecture
 
@@ -53,41 +63,44 @@ cd PrivateTunes
 #   → Copies .env.example → .env and runs the domain wizard
 #   → Starts the Docker stack
 #   → Waits for Navidrome to be healthy
-chmod +x scripts/setup.sh scripts/privatetunes.sh
 sudo ./scripts/setup.sh
 
 # Then use the interactive menu to download music & manage everything:
 ./scripts/privatetunes.sh
 ```
 
-## Downloading Music (CLI Menu)
+> **Note:** Permissions are auto-fixed on every startup — no manual `chmod` needed.
+
+## CLI Menu
 
 Run:
 
 ```bash
-./scripts/privatetunes.sh
+./scripts/privatetunes.sh           # Normal mode
+./scripts/privatetunes.sh --debug   # Verbose debug output
 ```
 
 ### Menu Actions
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `s` | **Full Setup** | Runs `setup.sh` end-to-end (Docker + deps + stack start) |
+| `s` | **Setup wizard** | Guided 5-step onboarding (domain, tools, Docker, admin) |
+| `u` | **Check for updates** | Git-based auto-update with version comparison |
+| `h` | **Help & docs** | Comprehensive help screen |
 | `1` | **Install/Update spotiflac-cli** | Download the latest binary |
-| `2` | **Download from Spotify URL** | Paste a track/album/playlist URL → downloads as FLAC into `./music` |
-| `3` | **View track metadata** | Inspect metadata for any Spotify track URL |
-| `b` | **Batch download** | Download all URLs listed in `links.txt` — skips already-downloaded |
-| `d` | **Download history** | View, clear, or retry tracked downloads |
-| `4` | **Start stack** | `docker compose up -d` + waits for health checks |
+| `2` | **Download from URL** | Paste a track/album/playlist URL → FLAC into `./music` |
+| `3` | **Track metadata** | Inspect metadata for any Spotify track URL |
+| `b` | **Batch download** | Download all URLs from `links.txt` with progress tracking |
+| `d` | **Download history** | View, clear, retry tracked downloads |
+| `4` | **Start stack** | `docker compose up -d` with health monitoring |
 | `5` | **Stop stack** | `docker compose down` |
-| `6` | **View logs** | Follow live logs from all containers |
-| `7` | **Stack status** | Health checks for Navidrome & Syncthing + disk usage |
-| `8` | **Restart Navidrome** | Restart only the Navidrome container |
-| `9` | **Domain setup wizard** | Configure DOMAIN, UID, GID in `.env` |
-| `c` | **Backup config** | Archive `.env` + `Caddyfile` + `docker-compose.yml` |
-| `p` | **Show paths / .env** | Display all important paths and current config |
-| `h` | **Help** | Detailed help screen |
-| `0` | **Exit** | Quit the menu |
+| `6` | **View logs** | Follow live container logs |
+| `7` | **Stack status** | Health checks + disk usage |
+| `8` | **Restart Navidrome** | Restart only the music server |
+| `9` | **Domain wizard** | Configure DOMAIN, UID, GID |
+| `c` | **Backup config** | Archive `.env`, `Caddyfile`, `docker-compose.yml` |
+| `p` | **Paths & environment** | Display paths, stats, and `.env` contents |
+| `0` | **Exit** | Quit |
 
 ## Configuration
 
@@ -105,64 +118,79 @@ cp .env.example .env
 
 ## Download History & Fault Tolerance
 
-PrivateTunes tracks every download in a persistent JSON database (`data/download_history.json`). This means:
+PrivateTunes tracks every download in a persistent JSON database (`data/download_history.json`):
 
-- **No duplicate downloads** — If a track/album/playlist was already downloaded, it's automatically skipped
-- **Filesystem-aware** — Scans your `music/` directory for existing files, so songs downloaded *before* this update are recognized too
-- **Resume interrupted batches** — If a batch download is interrupted (rate limits, crash, network error), re-running it picks up exactly where you left off
-- **Exponential backoff retries** — Failed downloads are retried up to 3 times with increasing wait times (5s → 15s → 45s), with extended waits for rate limits
-- **Atomic progress tracking** — Each successful download is recorded immediately, so even a hard crash preserves all progress
-- **URL normalization** — The same track won't be re-downloaded even if the URL has different tracking parameters (`?si=...`)
-
-### Existing Music (Pre-Update)
-
-On first launch after the update, if the history database is empty but your `music/` directory already has files, PrivateTunes will offer to **scan and import** them into the history. This ensures that tracks downloaded before the tracking system was added are recognized and won't be re-downloaded.
-
-You can also run this scan manually at any time from the history menu (`d` → `3`).
+- **No duplicate downloads** — Automatically skips previously downloaded content
+- **Filesystem-aware** — Scans `music/` for existing files on first run
+- **Resume interrupted batches** — Re-run picks up exactly where it left off
+- **Smart retries** — Exponential backoff (5s → 15s → 45s) with rate-limit detection
+- **Error analysis** — Detects DNS failures, 502 errors, timeouts, and adjusts strategy
+- **Atomic tracking** — Each download is recorded immediately via tmp+mv writes
+- **URL normalization** — Same track won't re-download even with different `?si=...` params
 
 ### Managing History
 
 Use menu option `d` to:
 - View download statistics and recent downloads
 - Clear failed entries (so they get retried on next batch)
-- Clear all history (to force re-downloading everything)
-- **Scan existing music** — Import pre-existing files into the history database
+- Clear all history (to force re-downloading)
+- Scan existing music into the history database
 
-The history file is stored at `data/download_history.json` and is git-ignored.
-
-> **Note:** `jq` is recommended for the best history experience. Without `jq`, a simpler line-based log fallback is used.
+> **Note:** `jq` is recommended for the best experience. Without `jq`, a simpler log fallback is used.
 
 ## File Structure
 
 ```
 PrivateTunes/
-├── Caddyfile              # Caddy reverse proxy config
-├── Caddyfile.example      # Template Caddyfile
-├── docker-compose.yml     # Docker stack definition
-├── .env.example           # Environment template
-├── links.txt              # Batch download URLs (one per line)
-├── music/                 # Your music library (Navidrome reads from here)
-├── data/                  # Navidrome + Syncthing persistent state
-│   └── download_history.json  # Download tracking database (auto-created)
-├── bin/                   # Local tools like spotiflac-cli (git-ignored)
+├── Caddyfile                  # Caddy reverse proxy config
+├── Caddyfile.example          # Template Caddyfile
+├── docker-compose.yml         # Docker stack definition
+├── .env.example               # Environment template
+├── links.txt                  # Batch download URLs (one per line)
+├── music/                     # Your music library (Navidrome reads here)
+├── data/                      # Persistent state
+│   └── download_history.json  # Download tracking (auto-created)
+├── bin/                       # Local tools (git-ignored)
 └── scripts/
-    ├── setup.sh           # Host bootstrap wizard
-    └── privatetunes.sh    # Interactive CLI menu
+    ├── privatetunes.sh        # Main CLI entry point
+    ├── setup.sh               # Host bootstrap wizard
+    └── lib/                   # Modular components
+        ├── ui.sh              # UI: colors, boxes, spinners, progress
+        ├── permissions.sh     # Auto-fix file permissions
+        ├── updater.sh         # Git-based auto-update system
+        ├── api_resolver.sh    # API health tracking & fallback
+        ├── downloader.sh      # Download engine with retries
+        ├── history.sh         # Persistent download history
+        ├── docker.sh          # Docker stack management
+        ├── config.sh          # .env management & backup
+        └── onboarding.sh      # Setup wizard & help
 ```
 
 ## Updating
 
+PrivateTunes checks for updates automatically on startup. You can also check manually:
+
 ```bash
-# Update containers to latest versions
+./scripts/privatetunes.sh
+# → Press [u] to check for updates
+```
+
+To update containers:
+
+```bash
 docker compose pull
 docker compose up -d
-
-# Update spotiflac-cli (via menu)
-./scripts/privatetunes.sh
-# → Select option [1]
 ```
 
 ## Troubleshooting
+
+### Debug Mode
+
+Run with verbose output to diagnose issues:
+
+```bash
+./scripts/privatetunes.sh --debug
+```
 
 ### Music not appearing in Navidrome
 
@@ -183,6 +211,14 @@ Make sure:
 - `DOMAIN` in `.env` is correct
 - Ports `80/443` are reachable publicly
 - Your DNS A/AAAA record points to the server
+
+### Permission Issues
+
+Permissions are auto-fixed on every startup. If you still have issues:
+
+```bash
+chmod +x scripts/*.sh scripts/lib/*.sh
+```
 
 ### Container Issues
 

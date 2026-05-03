@@ -30,3 +30,6 @@ squashfs-root/
 
 # Config backups
 /backups/
+
+# Scratch files
+/scratch/
