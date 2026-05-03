@@ -83,13 +83,42 @@ skip_track() {
 }
 
 # ── Install / Require spotiflac-cli ──────────────────────────────────────────
-install_spotiflac_cli() {
-  local arch asset url tmp_dir
-  arch="$(detect_arch)" || return 1
-  asset="spotiflac-linux-$arch.tar.gz"
-  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/v1.1.4/$asset"
+# Queries the GitHub releases API and echoes the latest tag (e.g. "v1.2.0").
+# Falls back to a known-good version if the API is unreachable.
+SPOTIFLAC_FALLBACK_VERSION="v1.1.4"
+SPOTIFLAC_RELEASES_API="https://api.github.com/repos/lahiruchinthana/SpotiFLAC-CLI/releases/latest"
 
-  spin_start "Downloading SpotiFLAC-CLI (v1.1.4 $arch)…"
+fetch_spotiflac_latest_version() {
+  local tag
+  if ensure_cmd curl; then
+    tag="$(curl -fsSL --max-time 5 \
+      -H "Accept: application/vnd.github+json" \
+      "$SPOTIFLAC_RELEASES_API" 2>/dev/null \
+      | grep '"tag_name"' | head -1 | cut -d'"' -f4)"
+  elif ensure_cmd wget; then
+    tag="$(wget -qO- --timeout=5 "$SPOTIFLAC_RELEASES_API" 2>/dev/null \
+      | grep '"tag_name"' | head -1 | cut -d'"' -f4)"
+  fi
+  if [ -z "$tag" ]; then
+    debug_msg "Could not fetch latest SpotiFLAC-CLI version — using fallback $SPOTIFLAC_FALLBACK_VERSION"
+    echo "$SPOTIFLAC_FALLBACK_VERSION"
+  else
+    echo "$tag"
+  fi
+}
+
+install_spotiflac_cli() {
+  local arch asset version url tmp_dir
+  arch="$(detect_arch)" || return 1
+
+  spin_start "Checking latest SpotiFLAC-CLI version…"
+  version="$(fetch_spotiflac_latest_version)"
+  spin_stop ok "Latest: $version"
+
+  asset="spotiflac-linux-$arch.tar.gz"
+  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/$version/$asset"
+
+  spin_start "Downloading SpotiFLAC-CLI ($version $arch)…"
   mkdir -p "$BIN_DIR"
   tmp_dir="$(mktemp -d)"
 
@@ -125,7 +154,7 @@ install_spotiflac_cli() {
         spin_stop fail "Downloaded binary is not compatible with this architecture ($arch)"
         return 1
       fi
-      spin_stop ok "SpotiFLAC-CLI installed → $SPOTIFLAC_CLI_BIN"
+      spin_stop ok "SpotiFLAC-CLI $version installed → $SPOTIFLAC_CLI_BIN"
     else
       rm -rf "$tmp_dir"
       spin_stop fail "Could not locate binary in archive"
@@ -147,6 +176,17 @@ require_spotiflac_cli() {
       warn "spotiflac-cli binary is not compatible with this architecture — reinstalling…"
       rm -f "$SPOTIFLAC_CLI_BIN"
     else
+      # Check if a newer version is available and upgrade automatically.
+      # _version_lt is defined in updater.sh, which is loaded before this module.
+      local installed_ver latest_ver
+      installed_ver="$("$SPOTIFLAC_CLI_BIN" --version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+      latest_ver="$(fetch_spotiflac_latest_version)"
+      if [ -n "$installed_ver" ] && [ -n "$latest_ver" ] && \
+         [ "$installed_ver" != "$latest_ver" ] && \
+         _version_lt "$installed_ver" "$latest_ver"; then
+        info "SpotiFLAC-CLI update available ($installed_ver → $latest_ver) — upgrading…"
+        install_spotiflac_cli || warn "Upgrade failed — continuing with installed version"
+      fi
       return 0
     fi
   fi
