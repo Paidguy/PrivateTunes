@@ -113,6 +113,13 @@ install_spotiflac_cli() {
       mv -f "$bin_file" "$SPOTIFLAC_CLI_BIN"
       chmod +x "$SPOTIFLAC_CLI_BIN"
       rm -rf "$tmp_dir"
+      # Validate the binary can actually run on this system's architecture
+      "$SPOTIFLAC_CLI_BIN" --version >/dev/null 2>&1; local validate_rc=$?
+      if [ $validate_rc -eq 126 ]; then
+        rm -f "$SPOTIFLAC_CLI_BIN"
+        spin_stop fail "Downloaded binary is not compatible with this architecture ($arch)"
+        return 1
+      fi
       spin_stop ok "SpotiFLAC-CLI installed → $SPOTIFLAC_CLI_BIN"
     else
       rm -rf "$tmp_dir"
@@ -127,7 +134,17 @@ install_spotiflac_cli() {
 }
 
 require_spotiflac_cli() {
-  if [ -x "$SPOTIFLAC_CLI_BIN" ]; then return 0; fi
+  if [ -x "$SPOTIFLAC_CLI_BIN" ]; then
+    # Verify the binary is actually runnable on this system's architecture.
+    # Exit code 126 means the kernel rejected it (Exec format error / wrong arch).
+    "$SPOTIFLAC_CLI_BIN" --version >/dev/null 2>&1; local check_rc=$?
+    if [ $check_rc -eq 126 ]; then
+      warn "spotiflac-cli binary is not compatible with this architecture — reinstalling…"
+      rm -f "$SPOTIFLAC_CLI_BIN"
+    else
+      return 0
+    fi
+  fi
   info "spotiflac-cli not found — installing now…"
   install_spotiflac_cli
 }
