@@ -103,11 +103,16 @@ install_spotiflac_cli() {
   fi
 
   if [ $? -eq 0 ] && [ -f "$tmp_dir/$asset" ]; then
-    tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
+    local extract_dir="$tmp_dir/extracted"
+    mkdir -p "$extract_dir"
+    tar -xzf "$tmp_dir/$asset" -C "$extract_dir"
     local bin_file
-    bin_file=$(find "$tmp_dir" -type f -executable | head -n 1)
+    bin_file=$(find "$extract_dir" -type f -executable | head -n 1)
     if [ -z "$bin_file" ]; then
-      bin_file=$(find "$tmp_dir" -type f -name "*spotiflac*" | head -n 1)
+      bin_file=$(find "$extract_dir" -type f -name "*spotiflac*" | head -n 1)
+    fi
+    if [ -z "$bin_file" ]; then
+      bin_file=$(find "$extract_dir" -type f ! -name "*.md" ! -name "LICENSE" ! -name "*.txt" | head -n 1)
     fi
     if [ -n "$bin_file" ]; then
       mv -f "$bin_file" "$SPOTIFLAC_CLI_BIN"
