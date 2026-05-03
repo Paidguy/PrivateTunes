@@ -32,10 +32,10 @@ download_with_retry() {
     # Capture output for error analysis (and stream it if not in batch mode)
     if [ "$is_batch" = "0" ]; then
       printf "\n"
-      "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" --auto --auto-quality 24 --max-quality-cover 2>&1 | tee "$tmp_log"
+      "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" --auto --auto-order "amazon-qobuz" --auto-quality 24 --max-quality-cover 2>&1 | tee "$tmp_log"
       exit_code=${PIPESTATUS[0]}
     else
-      "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" --auto --auto-quality 24 --max-quality-cover > "$tmp_log" 2>&1
+      "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" --auto --auto-order "amazon-qobuz" --auto-quality 24 --max-quality-cover > "$tmp_log" 2>&1
       exit_code=$?
     fi
 

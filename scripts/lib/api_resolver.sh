@@ -8,11 +8,14 @@
 _PT_API_RESOLVER_LOADED=1
 
 # ── API Endpoint Registry ────────────────────────────────────────────────────
+# These entries are used only for pre-flight reachability checks (curl HEAD).
+# Actual downloads are handled entirely by spotiflac-cli internals.
+# SpotiFLAC-CLI is invoked with --auto-order "amazon-qobuz" because the Tidal
+# (spotisaver.net / squid.wtf) and Deezer (yoinkify.lol) third-party APIs are
+# currently offline.
 API_ENDPOINTS=(
-  "tidal-primary|https://tidal-api.binimum.org|tidal"
-  "tidal-lucida|https://lucida.to|tidal"
-  "deezer-primary|https://deezer-api.binimum.org|deezer"
-  "deezer-lucida|https://lucida.to|deezer"
+  "amazon-primary|https://music.amazon.com|amazon"
+  "qobuz-primary|https://www.qobuz.com|qobuz"
 )
 
 declare -A API_HEALTH
@@ -74,8 +77,8 @@ get_apis_by_type() {
 }
 
 get_fallback_chain() {
-  get_apis_by_type "tidal"
-  get_apis_by_type "deezer"
+  get_apis_by_type "amazon"
+  get_apis_by_type "qobuz"
 }
 
 api_preflight_check() {
