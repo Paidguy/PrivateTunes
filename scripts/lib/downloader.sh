@@ -47,6 +47,10 @@ download_with_retry() {
     last_output="$(cat "$tmp_log")"
 
     if [ $exit_code -eq 0 ]; then
+      # Check if download was skipped (already exists)
+      if echo "$last_output" | grep -qi "skipped.*exists\|file already exists"; then
+        debug_msg "File already exists - skipped"
+      fi
       rm -f "$tmp_log"
       return 0
     fi
@@ -204,6 +208,8 @@ action_download() {
     history_record "$url" "completed"
     # Record individual tracks for albums/playlists
     record_playlist_tracks "$url"
+    # Scan existing files to update history
+    scan_existing_music 2>/dev/null || true
     ok "Download complete"
     if navidrome_ok; then
       info "Triggering Navidrome library scan…"
@@ -328,6 +334,12 @@ action_batch_download() {
     warn "$failed download(s) failed. Re-run batch to retry."
     info "Failed URLs are recorded — they will be retried next time."
   }
+
+  # Scan existing music to record any new files in history
+  if [ "$succeeded" -gt 0 ] || [ "$skipped" -gt 0 ]; then
+    info "Updating download history…"
+    scan_existing_music 2>/dev/null || true
+  fi
 
   if navidrome_ok && [ "$succeeded" -gt 0 ]; then
     info "Triggering Navidrome library scan…"
