@@ -76,25 +76,38 @@ check_all_tracks_in_history() {
   fi
 
   if ensure_cmd jq; then
-    # Get track IDs from metadata
-    local track_ids
-    track_ids=$(echo "$metadata_json" | jq -r '.items[]?.track.id // .items[].id // .tracks.items[]?.track.id // .tracks[].id // empty' 2>/dev/null)
+    # Get track IDs and track names from metadata (paired together)
+    local tracks_json
+    tracks_json=$(echo "$metadata_json" | jq -r '[.items[]?.track // .items[] // .tracks.items[]?.track // .tracks[] | {id: .id, name: .name}] | .[] | "\(.id // "")|\(.name // "")"' 2>/dev/null)
 
-    if [ -z "$track_ids" ]; then
+    if [ -z "$tracks_json" ]; then
       return 1
     fi
 
     local total=0 found=0
-    while IFS= read -r track_id; do
-      [ -z "$track_id" ] && continue
+    while IFS= read -r line; do
+      local track_id track_name
+      track_id="${line%%|*}"
+      track_name="${line##*|}"
+      [ -z "$track_name" ] && continue
       total=$((total + 1))
-      if grep -q "\"$track_id\"" "$HISTORY_FILE" 2>/dev/null && \
-         grep -A2 "\"$track_id\"" "$HISTORY_FILE" 2>/dev/null | grep -q '"completed"'; then
-        found=$((found + 1))
-      fi
-    done <<< "$track_ids"
 
-    # If we have tracks and ALL of them are in history, consider it complete
+      local found_this=false
+      # Check if in history by Spotify ID
+      if [ -n "$track_id" ] && grep -q "\"$track_id\"" "$HISTORY_FILE" 2>/dev/null && \
+         grep -A2 "\"$track_id\"" "$HISTORY_FILE" 2>/dev/null | grep -q '"completed"'; then
+        found_this=true
+      fi
+
+      # Also check filesystem by track name
+      if [ "$found_this" = false ] && filesystem_check_by_name "$track_name" ""; then
+        found_this=true
+      fi
+
+      [ "$found_this" = true ] && found=$((found + 1))
+    done <<< "$tracks_json"
+
+    # If we have tracks and ALL of them are found (by ID or filesystem), consider complete
     if [ "$total" -gt 0 ] && [ "$found" -eq "$total" ]; then
       return 0
     fi
