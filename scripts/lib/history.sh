@@ -247,7 +247,41 @@ filesystem_check_by_name() {
         return 0
       fi
     fi
-  done < <(find "$DEFAULT_OUTPUT_DIR" -type f \( -iname '*.flac' -o -iname '*.mp3' -o -iname '*.ogg' \) 2>/dev/null)
+  done < <(find "$DEFAULT_OUTPUT_DIR" -type f \( -iname '*.flac' -o -iname '*.mp3' -o -iname '*.ogg' -o -iname '*.m4a' -o -iname '*.wav' -o -iname '*.opus' \) 2>/dev/null)
+  return 1
+}
+
+# Get count of missing tracks from a playlist/album
+get_missing_track_count() {
+  local url="$1"
+  [ -x "$SPOTIFLAC_CLI_BIN" ] || return 1
+
+  local metadata_json
+  metadata_json=$("$SPOTIFLAC_CLI_BIN" "$url" --dump-json 2>/dev/null) || return 1
+
+  if [ -z "$metadata_json" ]; then
+    return 1
+  fi
+
+  local total=0 missing=0
+  if ensure_cmd jq; then
+    # Try different JSON paths for track names
+    local tracks
+    tracks=$(echo "$metadata_json" | jq -r '.items[]?.track.name // .items[].name // .tracks.items[]?.track.name // .tracks[].name // empty' 2>/dev/null)
+
+    while IFS= read -r track_name; do
+      [ -z "$track_name" ] && continue
+      total=$((total + 1))
+      if ! filesystem_check_by_name "$track_name" ""; then
+        missing=$((missing + 1))
+      fi
+    done <<< "$tracks"
+
+    echo "$missing"
+    return 0
+  fi
+
+  echo "-1"
   return 1
 }
 

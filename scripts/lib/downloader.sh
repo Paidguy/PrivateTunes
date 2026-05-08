@@ -274,6 +274,29 @@ action_batch_download() {
 
   while IFS= read -r line; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+    # For playlists/albums, check how many tracks are actually missing
+    local url_type
+    url_type="$(printf '%s' "$line" | sed -n 's|.*open\.spotify\.com/\([^/]*\)/.*|\1|p')"
+
+    if [ "$url_type" = "playlist" ] || [ "$url_type" = "album" ]; then
+      local missing_count
+      missing_count=$(get_missing_track_count "$line" 2>/dev/null || echo "-1")
+
+      if [ "$missing_count" = "0" ]; then
+        # All tracks already exist on disk
+        skipped=$((skipped + 1))
+        history_record "$line" "completed"
+        continue
+      elif [ "$missing_count" -gt 0 ]; then
+        # Some tracks are missing, will download
+        pending_urls+=("$line")
+        pending=$((pending + 1))
+        continue
+      fi
+    fi
+
+    # Fallback to original logic for tracks and unknown types
     if history_check "$line" || history_check_log "$line"; then
       skipped=$((skipped + 1))
     elif filesystem_check "$line"; then
