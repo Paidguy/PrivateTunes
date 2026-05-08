@@ -143,25 +143,47 @@ install_docker() {
 }
 
 install_spotiflac_cli() {
-  local arch asset url
+  local arch asset url tmp_dir
   arch="$(detect_arch)" || return 1
-  asset="spotiflac-cli-linux-$arch"
-  url="https://github.com/Superredstone/spotiflac-cli/releases/download/v1.0.0/$asset"
+  asset="spotiflac-linux-$arch.tar.gz"
+  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/v1.1.5/$asset"
 
-  info "Downloading spotiflac-cli ($asset)…"
+  info "Downloading SpotiFLAC-CLI (v1.1.5 $arch)…"
   mkdir -p "$BIN_DIR"
+  tmp_dir="$(mktemp -d)"
 
   if ensure_cmd curl; then
-    curl -fsSL "$url" -o "$SPOTIFLAC_CLI_BIN"
+    curl -fsSL "$url" -o "$tmp_dir/$asset"
   elif ensure_cmd wget; then
-    wget -q --show-progress -O "$SPOTIFLAC_CLI_BIN" "$url"
+    wget -q --show-progress -O "$tmp_dir/$asset" "$url"
   else
-    err "Neither curl nor wget found. Install one and re-run."
+    err "Neither curl nor wget found."
+    rm -rf "$tmp_dir"
     exit 1
   fi
 
-  chmod +x "$SPOTIFLAC_CLI_BIN"
-  ok "spotiflac-cli installed → $SPOTIFLAC_CLI_BIN"
+  if [ -f "$tmp_dir/$asset" ]; then
+    tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
+    local bin_file
+    bin_file=$(find "$tmp_dir" -type f -executable | head -n 1)
+    if [ -z "$bin_file" ]; then
+      bin_file=$(find "$tmp_dir" -type f -name "*spotiflac*" | head -n 1)
+    fi
+    if [ -n "$bin_file" ]; then
+      mv -f "$bin_file" "$SPOTIFLAC_CLI_BIN"
+      chmod +x "$SPOTIFLAC_CLI_BIN"
+      ok "SpotiFLAC-CLI installed → $SPOTIFLAC_CLI_BIN"
+    else
+      err "Could not locate binary in archive."
+      rm -rf "$tmp_dir"
+      exit 1
+    fi
+  else
+    err "Download failed."
+    rm -rf "$tmp_dir"
+    exit 1
+  fi
+  rm -rf "$tmp_dir"
 }
 
 # ── domain onboarding wizard ──────────────────────────────────────────────────

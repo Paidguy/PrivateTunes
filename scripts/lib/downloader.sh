@@ -19,6 +19,10 @@ download_with_retry() {
   local exit_code last_output tmp_log
   tmp_log="$(mktemp)"
 
+  # Extra flags
+  local extra_flags=("--auto" "--auto-quality" "24" "--max-quality-cover")
+  [ "${DEBUG_MODE:-0}" = "1" ] && extra_flags+=("--debug")
+
   while [ $attempt -lt $MAX_RETRIES ]; do
     attempt=$((attempt + 1))
 
@@ -30,12 +34,13 @@ download_with_retry() {
     fi
 
     # Capture output for error analysis (and stream it if not in batch mode)
+    # Using timeout to prevent hanging forever
     if [ "$is_batch" = "0" ]; then
       printf "\n"
-      "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" --auto --auto-quality 24 --max-quality-cover 2>&1 | tee "$tmp_log"
+      timeout "$DOWNLOAD_TIMEOUT" "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" "${extra_flags[@]}" 2>&1 | tee "$tmp_log"
       exit_code=${PIPESTATUS[0]}
     else
-      "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" --auto --auto-quality 24 --max-quality-cover > "$tmp_log" 2>&1
+      timeout "$DOWNLOAD_TIMEOUT" "$SPOTIFLAC_CLI_BIN" "$url" -o "$output_dir" "${extra_flags[@]}" > "$tmp_log" 2>&1
       exit_code=$?
     fi
 
@@ -44,6 +49,12 @@ download_with_retry() {
     if [ $exit_code -eq 0 ]; then
       rm -f "$tmp_log"
       return 0
+    fi
+
+    # Check if it was a timeout
+    if [ $exit_code -eq 124 ]; then
+      debug_msg "Download timed out after ${DOWNLOAD_TIMEOUT}s"
+      last_output="TIMEOUT: Process killed after $DOWNLOAD_TIMEOUT seconds"
     fi
 
     # Analyze failure for smart handling
@@ -67,7 +78,7 @@ download_with_retry() {
   # Log the last error for debugging
   if [ -n "$last_output" ] && [ "${DEBUG_MODE:-0}" = "1" ]; then
     printf "  ${DIM}Last error output:\n"
-    echo "$last_output" | tail -5 | sed 's/^/    /'
+    echo "$last_output" | tail -10 | sed 's/^/    /'
     printf "${NC}\n"
   fi
 
@@ -87,9 +98,9 @@ install_spotiflac_cli() {
   local arch asset url tmp_dir
   arch="$(detect_arch)" || return 1
   asset="spotiflac-linux-$arch.tar.gz"
-  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/v1.1.4/$asset"
+  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/v1.1.5/$asset"
 
-  spin_start "Downloading SpotiFLAC-CLI (v1.1.4 $arch)…"
+  spin_start "Downloading SpotiFLAC-CLI (v1.1.5 $arch)…"
   mkdir -p "$BIN_DIR"
   tmp_dir="$(mktemp -d)"
 
@@ -140,17 +151,22 @@ install_spotiflac_cli() {
 
 require_spotiflac_cli() {
   if [ -x "$SPOTIFLAC_CLI_BIN" ]; then
-    # Verify the binary is actually runnable on this system's architecture.
+    # 1. Verify the binary is actually runnable on this system's architecture.
     # Exit code 126 means the kernel rejected it (Exec format error / wrong arch).
     "$SPOTIFLAC_CLI_BIN" --version >/dev/null 2>&1; local check_rc=$?
     if [ $check_rc -eq 126 ]; then
       warn "spotiflac-cli binary is not compatible with this architecture — reinstalling…"
       rm -f "$SPOTIFLAC_CLI_BIN"
     else
-      return 0
+      # 2. Check version to ensure we are on 1.1.5
+      local current_v
+      current_v=$("$SPOTIFLAC_CLI_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+      if [ "$current_v" = "1.1.5" ]; then return 0; fi
+      info "Updating SpotiFLAC-CLI ($current_v -> 1.1.5)…"
     fi
+  else
+    info "spotiflac-cli not found — installing now…"
   fi
-  info "spotiflac-cli not found — installing now…"
   install_spotiflac_cli
 }
 
