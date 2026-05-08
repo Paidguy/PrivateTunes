@@ -186,24 +186,44 @@ action_download() {
   # Update history with any existing files first
   scan_existing_music 2>/dev/null || true
 
-  # Check download history
-  if history_check "$url" || history_check_log "$url"; then
-    local spotify_id
-    spotify_id="$(extract_spotify_id "$url")"
-    warn "Already downloaded: $spotify_id (from history)"
-    if ! confirm "Re-download anyway?"; then
-      info "Skipped."; pause; return 0
-    fi
-    info "Force re-downloading…"
-  elif filesystem_check "$url"; then
-    local spotify_id
-    spotify_id="$(extract_spotify_id "$url")"
-    warn "Already exists on disk: $spotify_id"
-    if ! confirm "Re-download anyway?"; then
+  # Determine URL type for smart filtering
+  local url_type
+  url_type="$(printf '%s' "$url" | sed -n 's|.*open\.spotify\.com/\([^/]*\)/.*|\1|p')"
+
+  # For albums/playlists, check how many tracks are actually missing
+  if [ "$url_type" = "playlist" ] || [ "$url_type" = "album" ]; then
+    local missing_count
+    missing_count=$(get_missing_track_count "$url" 2>/dev/null || echo "-1")
+
+    if [ "$missing_count" = "0" ]; then
+      # All tracks already exist on disk
+      info "All tracks already downloaded ($url_type has no missing tracks)"
       history_record "$url" "completed"
-      info "Skipped. Added to history."; pause; return 0
+      pause; return 0
+    elif [ "$missing_count" -gt 0 ]; then
+      # Some tracks are missing
+      info "Found $missing_count missing track(s) in $url_type - will download only missing"
     fi
-    info "Force re-downloading…"
+  else
+    # Check download history for single tracks
+    if history_check "$url" || history_check_log "$url"; then
+      local spotify_id
+      spotify_id="$(extract_spotify_id "$url")"
+      warn "Already downloaded: $spotify_id (from history)"
+      if ! confirm "Re-download anyway?"; then
+        info "Skipped."; pause; return 0
+      fi
+      info "Force re-downloading…"
+    elif filesystem_check "$url"; then
+      local spotify_id
+      spotify_id="$(extract_spotify_id "$url")"
+      warn "Already exists on disk: $spotify_id"
+      if ! confirm "Re-download anyway?"; then
+        history_record "$url" "completed"
+        info "Skipped. Added to history."; pause; return 0
+      fi
+      info "Force re-downloading…"
+    fi
   fi
 
   info "Downloading to: $DEFAULT_OUTPUT_DIR"
