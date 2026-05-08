@@ -251,12 +251,29 @@ filesystem_check() {
 filesystem_check_by_name() {
   local track_name="$1" track_artist="$2"
   [ -z "$track_name" ] && return 1
+
+  # Normalize track name for matching: lowercase, remove special chars
+  local normalized_name
+  normalized_name=$(printf '%s' "$track_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g' | xargs)
+
   while IFS= read -r filepath; do
     local basename
     basename="$(basename "$filepath")"
     basename="${basename%.*}"
-    if printf '%s' "$basename" | grep -qi "$track_name" 2>/dev/null; then
-      if [ -z "$track_artist" ] || printf '%s' "$basename" | grep -qi "$track_artist" 2>/dev/null; then
+    # Normalize for comparison
+    local normalized_base
+    normalized_base=$(printf '%s' "$basename" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g' | xargs)
+
+    # Check if normalized track name appears as a significant part of the filename
+    # (not just a substring of another word)
+    if printf '%s' "$normalized_base" | grep -qw "$normalized_name" 2>/dev/null; then
+      if [ -z "$track_artist" ]; then
+        return 0
+      fi
+      # Also check artist if provided
+      local normalized_artist
+      normalized_artist=$(printf '%s' "$track_artist" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g' | xargs)
+      if printf '%s' "$normalized_base" | grep -qi "$normalized_artist" 2>/dev/null; then
         return 0
       fi
     fi
@@ -282,14 +299,27 @@ get_missing_track_count() {
     local tracks
     tracks=$(echo "$metadata_json" | jq -r '.items[]?.track.name // .items[].name // .tracks.items[]?.track.name // .tracks[].name // empty' 2>/dev/null)
 
+    # Debug: log first few track names being checked
+    if [ -n "${DEBUG:-}" ]; then
+      echo "DEBUG: Checking tracks from playlist..." >&2
+      echo "$tracks" | head -5 >&2
+    fi
+
     while IFS= read -r track_name; do
       [ -z "$track_name" ] && continue
       total=$((total + 1))
-      if ! filesystem_check_by_name "$track_name" ""; then
+      local found=0
+      if filesystem_check_by_name "$track_name" ""; then
+        found=1
+      fi
+
+      if [ "$found" -eq 0 ]; then
         missing=$((missing + 1))
+        [ -n "${DEBUG:-}" ] && echo "DEBUG: MISSING: $track_name" >&2
       fi
     done <<< "$tracks"
 
+    [ -n "${DEBUG:-}" ] && echo "DEBUG: Total=$total, Missing=$missing" >&2
     echo "$missing"
     return 0
   fi
