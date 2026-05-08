@@ -34,10 +34,12 @@ extract_spotify_id() {
 history_check() {
   local url="$1"
   history_init
-  local norm_url spotify_id
+  local norm_url spotify_id url_type
   norm_url="$(normalize_url "$url")"
   spotify_id="$(extract_spotify_id "$url")"
+  url_type="$(printf '%s' "$url" | sed -n 's|.*open\.spotify\.com/\([^/]*\)/.*|\1|p')"
 
+  # Check direct URL match
   if ensure_cmd jq; then
     local found
     found=$(jq -r --arg nurl "$norm_url" --arg sid "$spotify_id" \
@@ -50,7 +52,84 @@ history_check() {
       return 0
     fi
   fi
+
+  # For albums/playlists, check if ALL tracks are already downloaded
+  if [ "$url_type" = "album" ] || [ "$url_type" = "playlist" ]; then
+    if check_all_tracks_in_history "$url"; then
+      return 0
+    fi
+  fi
+
   return 1
+}
+
+# Check if all tracks in an album/playlist are already in history
+check_all_tracks_in_history() {
+  local url="$1"
+  [ -x "$SPOTIFLAC_CLI_BIN" ] || return 1
+
+  local metadata_json
+  metadata_json=$("$SPOTIFLAC_CLI_BIN" "$url" --dump-json 2>/dev/null) || return 1
+
+  if [ -z "$metadata_json" ]; then
+    return 1
+  fi
+
+  if ensure_cmd jq; then
+    # Get track IDs from metadata
+    local track_ids
+    track_ids=$(echo "$metadata_json" | jq -r '.items[]?.track.id // .items[].id // .tracks.items[]?.track.id // .tracks[].id // empty' 2>/dev/null)
+
+    if [ -z "$track_ids" ]; then
+      return 1
+    fi
+
+    local total=0 found=0
+    while IFS= read -r track_id; do
+      [ -z "$track_id" ] && continue
+      total=$((total + 1))
+      if grep -q "\"$track_id\"" "$HISTORY_FILE" 2>/dev/null && \
+         grep -A2 "\"$track_id\"" "$HISTORY_FILE" 2>/dev/null | grep -q '"completed"'; then
+        found=$((found + 1))
+      fi
+    done <<< "$track_ids"
+
+    # If we have tracks and ALL of them are in history, consider it complete
+    if [ "$total" -gt 0 ] && [ "$found" -eq "$total" ]; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+# Record all tracks from an album/playlist in history after successful download
+record_playlist_tracks() {
+  local url="$1"
+  [ -x "$SPOTIFLAC_CLI_BIN" ] || return 1
+
+  local metadata_json
+  metadata_json=$("$SPOTIFLAC_CLI_BIN" "$url" --dump-json 2>/dev/null) || return 1
+
+  if [ -z "$metadata_json" ]; then
+    return 1
+  fi
+
+  if ensure_cmd jq; then
+    # Get track IDs and their Spotify URLs from metadata
+    local tracks_json
+    tracks_json=$(echo "$metadata_json" | jq -r '.items[]?.track // .items[] // .tracks.items[]?.track // .tracks[]' 2>/dev/null)
+
+    if [ -z "$tracks_json" ] || [ "$tracks_json" = "null" ]; then
+      return 1
+    fi
+
+    echo "$tracks_json" | jq -r 'select(.id != null) | "track/\(.id)"' 2>/dev/null | while IFS= read -r track_spotify_id; do
+      [ -z "$track_spotify_id" ] && continue
+      # Record each track in history as completed
+      history_record "https://open.spotify.com/$track_spotify_id" "completed"
+    done
+  fi
 }
 
 history_record() {
@@ -92,22 +171,66 @@ filesystem_check() {
   local url="$1"
   local url_type
   url_type="$(printf '%s' "$url" | sed -n 's|.*open\.spotify\.com/\([^/]*\)/.*|\1|p')"
-  [ "$url_type" != "track" ] && return 1
-  [ -x "$SPOTIFLAC_CLI_BIN" ] || return 1
 
-  local track_name track_artist
-  track_name=$("$SPOTIFLAC_CLI_BIN" "$url" --print title 2>/dev/null)
-  track_artist=$("$SPOTIFLAC_CLI_BIN" "$url" --print artist 2>/dev/null)
-  [ -z "$track_name" ] && return 1
+  # For single track, check if file exists by track name
+  if [ "$url_type" = "track" ]; then
+    [ -x "$SPOTIFLAC_CLI_BIN" ] || return 1
 
-  find "$DEFAULT_OUTPUT_DIR" -type f -iname "*.flac" 2>/dev/null | while IFS= read -r filepath; do
-    local basename
-    basename="$(basename "$filepath" .flac)"
-    if printf '%s' "$basename" | grep -qi "$track_name" 2>/dev/null && \
-       printf '%s' "$basename" | grep -qi "$track_artist" 2>/dev/null; then
+    local track_name track_artist
+    track_name=$("$SPOTIFLAC_CLI_BIN" "$url" --print title 2>/dev/null)
+    track_artist=$("$SPOTIFLAC_CLI_BIN" "$url" --print artist 2>/dev/null)
+    [ -z "$track_name" ] && return 1
+
+    if filesystem_check_by_name "$track_name" "$track_artist"; then
       return 0
     fi
-  done && return 0
+    return 1
+  fi
+
+  # For album/playlist, check each track in the album/playlist
+  if [ "$url_type" = "album" ] || [ "$url_type" = "playlist" ]; then
+    [ -x "$SPOTIFLAC_CLI_BIN" ] || return 1
+
+    # Get track list from metadata
+    local metadata_json
+    metadata_json=$("$SPOTIFLAC_CLI_BIN" "$url" --dump-json 2>/dev/null) || return 1
+
+    if [ -z "$metadata_json" ]; then
+      return 1
+    fi
+
+    # Check if any tracks exist on filesystem
+    # For playlists, tracks are in items[].track.name
+    # For albums, tracks are in items[].name
+    local track_count=0
+    local found_count=0
+
+    if ensure_cmd jq; then
+      # Try playlist format first
+      track_count=$(echo "$metadata_json" | jq -r '.items[]?.track.name // .items[].name // empty' 2>/dev/null | wc -l)
+      if [ "$track_count" -eq 0 ]; then
+        # Try album format
+        track_count=$(echo "$metadata_json" | jq -r '.tracks.items[]?.track.name // .tracks[]?.name // empty' 2>/dev/null | wc -l)
+      fi
+
+      if [ "$track_count" -gt 0 ]; then
+        # Check if ANY track from the album/playlist exists on disk
+        # If at least one exists, consider it "found" to avoid re-downloading
+        local existing
+        existing=$(echo "$metadata_json" | jq -r '.items[]?.track.name // .items[].name // .tracks.items[]?.track.name // .tracks[]?.name // empty' 2>/dev/null | while read -r track_name; do
+          [ -z "$track_name" ] && continue
+          if filesystem_check_by_name "$track_name" ""; then
+            echo "found"
+            break
+          fi
+        done)
+
+        if [ -n "$existing" ]; then
+          return 0
+        fi
+      fi
+    fi
+  fi
 
   return 1
 }

@@ -202,6 +202,8 @@ action_download() {
   info "Downloading to: $DEFAULT_OUTPUT_DIR"
   if download_with_retry "$url" "$DEFAULT_OUTPUT_DIR" "0"; then
     history_record "$url" "completed"
+    # Record individual tracks for albums/playlists
+    record_playlist_tracks "$url"
     ok "Download complete"
     if navidrome_ok; then
       info "Triggering Navidrome library scan…"
@@ -300,6 +302,8 @@ action_batch_download() {
 
     if download_with_retry "$url" "$DEFAULT_OUTPUT_DIR" "1"; then
       history_record "$url" "completed"
+      # Record individual tracks for albums/playlists
+      record_playlist_tracks "$url"
       succeeded=$((succeeded + 1))
       track_status "$count" "$pending" "$sid" "success"
     else
