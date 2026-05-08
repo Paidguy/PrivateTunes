@@ -95,12 +95,12 @@ skip_track() {
 
 # ── Install / Require spotiflac-cli ──────────────────────────────────────────
 install_spotiflac_cli() {
-  local arch asset url tmp_dir
+  local arch asset url tmp_dir version="v1.15"
   arch="$(detect_arch)" || return 1
   asset="spotiflac-linux-$arch.tar.gz"
-  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/v1.1.5/$asset"
+  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/$version/$asset"
 
-  spin_start "Downloading SpotiFLAC-CLI (v1.1.5 $arch)…"
+  spin_start "Downloading SpotiFLAC-CLI ($version $arch)…"
   mkdir -p "$BIN_DIR"
   tmp_dir="$(mktemp -d)"
 
@@ -158,11 +158,11 @@ require_spotiflac_cli() {
       warn "spotiflac-cli binary is not compatible with this architecture — reinstalling…"
       rm -f "$SPOTIFLAC_CLI_BIN"
     else
-      # 2. Check version to ensure we are on 1.1.5
+      # 2. Check version to ensure we are on 1.15
       local current_v
-      current_v=$("$SPOTIFLAC_CLI_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-      if [ "$current_v" = "1.1.5" ]; then return 0; fi
-      info "Updating SpotiFLAC-CLI ($current_v -> 1.1.5)…"
+      current_v=$("$SPOTIFLAC_CLI_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
+      if [ "$current_v" = "1.15" ]; then return 0; fi
+      info "Updating SpotiFLAC-CLI ($current_v -> 1.15)…"
     fi
   else
     info "spotiflac-cli not found — installing now…"

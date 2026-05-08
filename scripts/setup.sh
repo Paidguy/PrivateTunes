@@ -143,12 +143,12 @@ install_docker() {
 }
 
 install_spotiflac_cli() {
-  local arch asset url tmp_dir
+  local arch asset url tmp_dir version="v1.15"
   arch="$(detect_arch)" || return 1
   asset="spotiflac-linux-$arch.tar.gz"
-  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/v1.1.5/$asset"
+  url="https://github.com/lahiruchinthana/SpotiFLAC-CLI/releases/download/$version/$asset"
 
-  info "Downloading SpotiFLAC-CLI (v1.1.5 $arch)…"
+  info "Downloading SpotiFLAC-CLI ($version $arch)…"
   mkdir -p "$BIN_DIR"
   tmp_dir="$(mktemp -d)"
 
