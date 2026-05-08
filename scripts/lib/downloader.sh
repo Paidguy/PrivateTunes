@@ -183,6 +183,9 @@ action_download() {
   [ -z "$url" ] && { err "URL is required."; pause; return 0; }
   printf "\n"
 
+  # Update history with any existing files first
+  scan_existing_music 2>/dev/null || true
+
   # Check download history
   if history_check "$url" || history_check_log "$url"; then
     local spotify_id
@@ -265,6 +268,9 @@ action_batch_download() {
   }
 
   spin_start "Scanning $total URL(s) against download history…"
+
+  # First, ensure history is up to date by scanning existing files
+  scan_existing_music 2>/dev/null || true
 
   while IFS= read -r line; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
